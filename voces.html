@@ -15,6 +15,11 @@ pre{white-space:pre-wrap;background:#fff;padding:10px;border-radius:8px;font-siz
   <option value="calido">Cálido y tranquilo</option>
   <option value="neutro">Sin estilo (solo la voz)</option>
 </select>
+<div id="campoClave" hidden>
+  <p><b>Falta la clave en este navegador.</b> Pegala acá una vez (es la misma de Rango):</p>
+  <input id="clave" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" style="font-size:16px;padding:10px;width:100%;box-sizing:border-box;border-radius:10px;border:2px solid #1f2d2a">
+  <button id="guardarClave" style="text-align:center">Guardar clave</button>
+</div>
 <div id="lista"></div>
 <pre id="log"></pre>
 <script>
@@ -32,7 +37,14 @@ const FRASE='Qué hacés, compadre. Soy Rango, el más pícaro de este pueblo. P
 const MODELOS=['gemini-2.5-flash-preview-tts','gemini-2.5-flash-tts','gemini-2.5-pro-preview-tts'];
 const log=(t)=>{document.getElementById('log').textContent+=t+'\n'};
 let clave='';try{clave=localStorage.getItem('asistente_clave')||''}catch{}
-if(!clave)log('No encuentro la clave en este navegador: abrí Rango (la página principal), guardala en Ajustes y volvé acá.');
+const campo=document.getElementById('campoClave');
+if(!clave)campo.hidden=false;
+document.getElementById('guardarClave').onclick=()=>{
+  const c=document.getElementById('clave').value.replace(/["'\s]/g,'').replace(/[^\x21-\x7E]/g,'');
+  if(!c){log('Pegá la clave primero.');return}
+  clave=c;try{localStorage.setItem('asistente_clave',c)}catch{}
+  document.getElementById('clave').value='';campo.hidden=true;log('Clave guardada. Ya podés tocar una voz.');
+};
 let ctx=null;
 async function probar(voz){
   if(!clave){log('Falta la clave.');return}
