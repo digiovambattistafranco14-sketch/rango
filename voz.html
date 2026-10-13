@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prueba de voz</title>
+<style>body{font:18px/1.4 -apple-system,Arial,sans-serif;margin:20px;background:#f4efe6;color:#1f2d2a}
+button{font-size:20px;padding:16px;margin:8px 0;width:100%;border-radius:12px;border:2px solid #1f2d2a;background:#e0a22f}
+pre{white-space:pre-wrap;background:#fff;padding:10px;border-radius:8px;font-size:14px}</style></head><body>
+<h2>Prueba de voz</h2>
+<p>Subí el volumen y sacá el silencio del costado. Tocá los botones de a uno.</p>
+<button id="a">1. Hablar (voz por defecto)</button>
+<button id="b">2. Hablar en español</button>
+<button id="c">3. Sonido de prueba (pip)</button>
+<pre id="log">cargando…</pre>
+<script>
+const log=(t)=>{document.getElementById('log').textContent+='\n'+t};
+document.getElementById('log').textContent='';
+log('speechSynthesis: '+(window.speechSynthesis?'sí':'NO'));
+function voces(){const v=speechSynthesis.getVoices();return v.length+' voces; español: '+v.filter(x=>/^es/i.test(x.lang)).map(x=>x.name+' ('+x.lang+')').join(', ')}
+try{log(voces());speechSynthesis.onvoiceschanged=()=>log('voces cargadas -> '+voces())}catch(e){log('error voces: '+e)}
+function hablar(es){
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance('Hola, soy Rango. Si me escuchás, funciona.');
+    if(es){u.lang='es-AR';const v=speechSynthesis.getVoices().find(x=>/^es/i.test(x.lang));if(v){u.voice=v;log('uso voz: '+v.name)}}
+    u.volume=1;
+    u.onstart=()=>log('→ empezó a hablar');
+    u.onend=()=>log('→ terminó');
+    u.onerror=(e)=>log('→ ERROR: '+e.error);
+    speechSynthesis.speak(u);
+    log('pedido enviado (speaking='+speechSynthesis.speaking+')');
+  }catch(e){log('excepción: '+e)}
+}
+document.getElementById('a').onclick=()=>hablar(false);
+document.getElementById('b').onclick=()=>hablar(true);
+document.getElementById('c').onclick=()=>{
+  try{const A=new (window.AudioContext||window.webkitAudioContext)();A.resume();const o=A.createOscillator(),g=A.createGain();g.gain.value=0.3;o.frequency.value=660;o.connect(g);g.connect(A.destination);o.start();setTimeout(()=>o.stop(),500);log('pip enviado (estado: '+A.state+')')}catch(e){log('error pip: '+e)}
+};
+</script></body></html>
