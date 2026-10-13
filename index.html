@@ -271,19 +271,19 @@
       <div class="campo">
         <label for="vozGeminiNombre">Voz de Gemini</label>
         <select id="vozGeminiNombre">
-          <option value="Kore">Kore (firme, clara)</option>
-          <option value="Algenib">Algenib (grave y rasposa)</option>
-          <option value="Orus">Orus (firme, seria)</option>
-          <option value="Fenrir">Fenrir (vivaz, entusiasta)</option>
-          <option value="Puck">Puck (alegre, juguetona)</option>
-          <option value="Umbriel">Umbriel (tranquila, canchera)</option>
-          <option value="Charon">Charon (pausada)</option>
-          <option value="Alnilam">Alnilam (firme, directa)</option>
-          <option value="Gacrux">Gacrux (madura, calma)</option>
-          <option value="Iapetus">Iapetus (clara, cercana)</option>
-          <option value="Rasalgethi">Rasalgethi (narradora)</option>
-          <option value="Enceladus">Enceladus (suave, con aire)</option>
-          <option value="Algieba">Algieba (suave, fluida)</option>
+          <option value="Kore">Kore · mujer, firme y clara</option>
+          <option value="Algenib">Algenib · hombre, grave y rasposa</option>
+          <option value="Orus">Orus · hombre, firme y serio</option>
+          <option value="Fenrir">Fenrir · hombre, vivaz y entusiasta</option>
+          <option value="Puck">Puck · hombre, alegre y juguetón</option>
+          <option value="Umbriel">Umbriel · hombre, tranquilo y canchero</option>
+          <option value="Charon">Charon · hombre, pausado</option>
+          <option value="Alnilam">Alnilam · hombre, firme y directo</option>
+          <option value="Gacrux">Gacrux · mujer, madura y calma</option>
+          <option value="Iapetus">Iapetus · hombre, claro y cercano</option>
+          <option value="Rasalgethi">Rasalgethi · hombre, narrador</option>
+          <option value="Enceladus">Enceladus · hombre, suave</option>
+          <option value="Algieba">Algieba · hombre, suave y fluido</option>
         </select>
         <label for="estiloGemini">Estilo al hablar</label>
         <select id="estiloGemini">
@@ -660,7 +660,10 @@
       app.vigia = setTimeout(() => terminarDeHablar(token), 30000);
       hablarGemini(limpiarParaVoz(texto), token, velocidad).then((ok) => {
         if (token !== app.tokenVoz) return;
-        if (!ok) conVozDelNavegador();
+        if (!ok) {
+          if (!app.avisoCaida) { app.avisoCaida = true; aviso('Ahora no pude usar la voz de Gemini (puede ser el límite diario de la clave), así que hablo con la voz del celu. Por eso suena distinta y no sale por Bluetooth.'); }
+          conVozDelNavegador();
+        }
       });
     } else {
       conVozDelNavegador();
