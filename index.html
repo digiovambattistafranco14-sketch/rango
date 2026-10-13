@@ -415,6 +415,7 @@
   const INSTRUCCIONES_BASE = `Te llamás ${NOMBRE} (se te despierta diciendo "Hola ${NOMBRE}") y sos el asistente personal de una familia argentina que vive en una casa de dos pisos. ` +
     `Lo que te llega viene de un reconocimiento de voz y puede tener errores de transcripción: si algo no tiene sentido, pedí con simpatía que lo repitan. ` +
     `Hablás en español rioplatense, usando "vos", con un tono cálido, claro y directo. ` +
+    `Tenés personalidad propia: sos pícaro, socarrón y un poco teatral, con aire de personaje de pueblo del lejano oeste que se las sabe todas. Usá de vez en cuando un apodo cariñoso como "compadre" o "amigo", metés algún chiste corto o comentario ingenioso, y sin exagerar: primero siempre la respuesta útil y clara, y el toque de carácter va en una frase, no en todas. ` +
     `Tus respuestas se leen en voz alta, así que respondé corto (de 2 a 4 oraciones, salvo que pidan una receta o una explicación larga), ` +
     `sin viñetas, sin asteriscos, sin markdown, sin emojis y sin direcciones web. ` +
     `Si piden una receta, nombrá primero los ingredientes y después contá los pasos con palabras como "primero", "después" y "por último". ` +
@@ -674,12 +675,12 @@
   const MODELOS_VOZ = ['gemini-2.5-flash-preview-tts', 'gemini-2.5-flash-tts', 'gemini-2.5-pro-preview-tts'];
   const ESTILOS_VOZ = {
     calido: 'Decilo con voz natural, cálida y tranquila, en español rioplatense: ',
-    oeste: 'Hablá como un personaje pícaro y simpático de un pueblo del lejano oeste, con tono socarrón y pausado, con acento rioplatense argentino, y decí: ',
+    oeste: 'Interpretá a un personaje pícaro y teatral de un pueblo del lejano oeste, con acento rioplatense argentino. Voz grave y algo rasposa, ritmo pausado, una sonrisa socarrona en la voz, pausas breves para dar efecto y la calidez de un buen amigo. Decí el siguiente texto con esa interpretación: ',
     neutro: ''
   };
   const NOMBRES_VOZ = ['Kore', 'Algenib', 'Orus', 'Fenrir', 'Puck', 'Umbriel', 'Charon', 'Alnilam', 'Gacrux', 'Iapetus', 'Rasalgethi', 'Enceladus', 'Algieba'];
-  const nombreVozGemini = () => { const v = guardado.leer('asistente_voz_gemini_nombre'); return NOMBRES_VOZ.includes(v) ? v : 'Kore'; };
-  const estiloVozGemini = () => { const v = guardado.leer('asistente_estilo_gemini'); return Object.prototype.hasOwnProperty.call(ESTILOS_VOZ, v) ? v : 'calido'; };
+  const nombreVozGemini = () => { const v = guardado.leer('asistente_voz_gemini_nombre'); return NOMBRES_VOZ.includes(v) ? v : 'Algenib'; };
+  const estiloVozGemini = () => { const v = guardado.leer('asistente_estilo_gemini'); return Object.prototype.hasOwnProperty.call(ESTILOS_VOZ, v) ? v : 'oeste'; };
   function usarVozGemini() {
     const v = guardado.leer('asistente_voz_gemini');
     return v ? v === 'si' : ES_IOS;
