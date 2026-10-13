@@ -1,0 +1,1630 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<script>
+/* Si algo falla al abrir la página, lo muestra en pantalla en vez de quedar en blanco. */
+(function () {
+  function mostrar(m) {
+    try {
+      var d = document.getElementById('rango-error');
+      if (!d) {
+        d = document.createElement('div'); d.id = 'rango-error';
+        d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#7a1f1f;color:#fff;font:14px/1.4 sans-serif;padding:10px 12px;white-space:pre-wrap;max-height:40vh;overflow:auto';
+        (document.body || document.documentElement).appendChild(d);
+      }
+      d.textContent = 'Rango tuvo un problema. Sacale captura a esto y mandásela a Claude:\n' + m;
+    } catch (e) { /* nada */ }
+  }
+  window.addEventListener('error', function (e) { mostrar((e.message || 'error') + ' (línea ' + (e.lineno || '?') + ')'); });
+  window.addEventListener('unhandledrejection', function (e) { mostrar('promesa: ' + ((e.reason && e.reason.message) || e.reason)); });
+})();
+</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rango, asistente de voz</title>
+<style>
+  :root {
+    color-scheme: light;
+    --fondo: #F4EFE7;
+    --panel: #FCF9F3;
+    --linea: #E4DACA;
+    --tinta: #243A35;
+    --tinta-suave: #5B6B66;
+    --verde: #3A5F56;
+    --visor: #1F2D2A;
+    --ambar: #E0A030;
+    --ambar-oscuro: #8F5F14;
+    --error: #A32D2D;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100dvh;
+    background: var(--fondo);
+    color: var(--tinta);
+    font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+    font-size: 1rem;
+    line-height: 1.55;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
+  .contenedor { width: min(720px, 100% - 32px); margin-inline: auto; }
+
+  /* Cara del robot */
+  .robot { display: grid; justify-items: center; padding: clamp(28px, 6vw, 44px) 0 8px; }
+  .cabeza {
+    position: relative;
+    width: clamp(130px, 34vw, 190px);
+    aspect-ratio: 1.15;
+    background: var(--panel);
+    border: 4px solid var(--tinta);
+    border-radius: 28%;
+    display: grid;
+    place-items: center;
+  }
+  .cabeza::before {
+    content: "";
+    position: absolute;
+    top: -20px; left: 50%;
+    translate: -50% 0;
+    width: 34%; height: 16px;
+    background: var(--verde);
+    border-radius: 7px 7px 2px 2px;
+  }
+  .visor {
+    width: 76%; height: 62%;
+    background: var(--visor);
+    border-radius: 30% / 36%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14%;
+  }
+  .ojos { display: flex; gap: 24%; }
+  .ojo {
+    width: clamp(16px, 4.2vw, 24px);
+    aspect-ratio: 1;
+    background: var(--ambar);
+    border-radius: 50%;
+    animation: parpadeo 5s infinite;
+    transition: transform .2s;
+  }
+  .boca { width: 24%; height: 4px; background: var(--ambar); border-radius: 4px; }
+  .cabeza[data-atento="1"] { box-shadow: 0 0 0 7px rgba(224,160,48,.28); animation: atento 2.4s ease-in-out infinite; }
+  @keyframes atento { 0%, 100% { box-shadow: 0 0 0 5px rgba(224,160,48,.22); } 50% { box-shadow: 0 0 0 11px rgba(224,160,48,.10); } }
+  .cabeza[data-estado="escuchando"] .ojo { transform: scale(1.3); animation: none; }
+  .cabeza[data-estado="pensando"] .ojos { animation: mirar 1.4s ease-in-out infinite; }
+  .cabeza[data-estado="hablando"] .boca { animation: hablar .38s ease-in-out infinite alternate; }
+  @keyframes parpadeo { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+  @keyframes mirar { 0%, 100% { transform: translateX(-16%); } 50% { transform: translateX(16%); } }
+  @keyframes hablar { from { height: 4px; width: 22%; } to { height: 14px; width: 30%; border-radius: 8px; } }
+
+  /* Ajustes */
+  details.ajustes {
+    margin-top: 12px;
+    background: var(--panel);
+    border: 1px solid var(--linea);
+    border-radius: 14px;
+    padding: 4px 16px;
+  }
+  details.ajustes summary { cursor: pointer; padding: 10px 0; font-weight: 500; }
+  .ajustes .cuerpo { padding: 4px 0 16px; display: grid; gap: 12px; }
+  .ajustes ol { margin: 0; padding-left: 1.2em; }
+  .ajustes li { margin-bottom: 4px; }
+  .ajustes a { color: var(--verde); }
+  .campo { display: grid; gap: 4px; }
+  .campo label { font-size: .9rem; color: var(--tinta-suave); }
+  input[type="text"], input[type="password"], input[type="search"], select {
+    width: 100%; font: inherit; color: inherit;
+    padding: 12px 14px;
+    background: #fff;
+    border: 1px solid var(--linea);
+    border-radius: 12px;
+  }
+  input[type="range"] { width: 100%; accent-color: var(--verde); }
+  input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--ambar); outline-offset: 2px;
+  }
+  .nota { font-size: .875rem; color: var(--tinta-suave); margin: 0; }
+  .fila { display: flex; gap: 8px; flex-wrap: wrap; }
+  .boton {
+    font: inherit; font-weight: 500;
+    padding: 10px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--tinta);
+    background: transparent; color: var(--tinta);
+    cursor: pointer;
+  }
+  .boton.primario { background: var(--tinta); color: var(--panel); }
+  .boton:hover { filter: brightness(1.15); }
+  .boton:disabled { opacity: .5; cursor: progress; }
+
+  .registro-texto { max-height: 220px; overflow: auto; margin: 8px 0; padding: 8px; font-size: .75rem; line-height: 1.4; white-space: pre-wrap; background: #fff; border: 1px solid var(--linea); border-radius: 10px; }
+  details.registro summary { cursor: pointer; font-size: .9rem; color: var(--tinta-suave); }
+
+  /* Música */
+  .musica {
+    display: grid; grid-template-columns: minmax(220px, 340px) 1fr; gap: 16px; align-items: center;
+    margin-bottom: 16px; padding: 12px;
+    background: var(--panel); border: 1px solid var(--linea); border-radius: 14px;
+  }
+  .musica-video { aspect-ratio: 16 / 9; min-height: 200px; background: #000; border-radius: 10px; overflow: hidden; }
+  .musica-video iframe { width: 100%; height: 100%; border: 0; display: block; }
+  .musica-datos { display: grid; gap: 10px; min-width: 0; }
+  .musica-titulo { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+  .musica-etiqueta { font-size: .85rem; color: var(--tinta-suave); margin: 0; }
+  .musica-vol { display: grid; gap: 4px; font-size: .9rem; color: var(--tinta-suave); }
+  @media (max-width: 600px) { .musica { grid-template-columns: 1fr; } }
+
+  /* Conversación */
+  main { padding: 16px 0 24px; }
+  #historial { display: grid; gap: 10px; }
+  .burbuja {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .burbuja.yo { justify-self: end; background: var(--tinta); color: var(--panel); border-bottom-right-radius: 4px; }
+  .burbuja.robot { justify-self: start; background: var(--panel); border: 1px solid var(--linea); border-bottom-left-radius: 4px; }
+  .burbuja.aviso { justify-self: center; max-width: 100%; background: transparent; border: 1px dashed var(--ambar-oscuro); color: var(--ambar-oscuro); text-align: center; }
+  .burbuja.error { border-color: var(--error); color: var(--error); }
+  #vivo { min-height: 1.5em; margin: 10px 0 0; text-align: right; font-style: italic; color: var(--tinta-suave); }
+  .sugerencias { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip {
+    font: inherit; font-size: .9rem;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--verde);
+    background: var(--panel); color: var(--verde);
+    cursor: pointer;
+  }
+  .chip:hover { background: #fff; }
+
+  /* Controles */
+  footer {
+    position: sticky; bottom: 0;
+    background: var(--fondo);
+    border-top: 1px solid var(--linea);
+    padding: 10px 0 16px;
+  }
+  .controles { display: grid; justify-items: center; gap: 10px; }
+  .estado { margin: 0; min-height: 1.5em; color: var(--tinta-suave); text-align: center; }
+  #mic {
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    border: 4px solid var(--tinta);
+    background: var(--ambar);
+    color: var(--visor);
+    display: grid; place-items: center;
+    cursor: pointer;
+    transition: transform .15s;
+  }
+  #mic:hover { transform: scale(1.05); }
+  #mic[aria-pressed="true"] { background: var(--tinta); color: var(--ambar); animation: latido 1.2s ease-in-out infinite; }
+  @keyframes latido { 0%, 100% { box-shadow: 0 0 0 0 rgba(224,160,48,.55); } 50% { box-shadow: 0 0 0 14px rgba(224,160,48,0); } }
+  #mic svg { width: 34px; height: 34px; }
+  #manos { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 16px; }
+  #manos .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--tinta-suave); }
+  #manos[aria-pressed="true"] { background: var(--tinta); color: var(--panel); }
+  #manos[aria-pressed="true"] .punto { background: var(--ambar); }
+  .opciones { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; font-size: .9rem; color: var(--tinta-suave); }
+  .opciones label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .opciones button { font: inherit; background: none; border: 0; color: inherit; text-decoration: underline; cursor: pointer; padding: 0; }
+  form.escribir { display: flex; gap: 8px; width: 100%; }
+  form.escribir input { flex: 1; }
+
+  .solo-lectores { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="contenedor">
+  <div class="robot">
+    <div class="cabeza" id="cara" data-estado="reposo" aria-hidden="true">
+      <div class="visor">
+        <div class="ojos"><div class="ojo"></div><div class="ojo"></div></div>
+        <div class="boca"></div>
+      </div>
+    </div>
+  </div>
+
+  <details class="ajustes" id="ajustes">
+    <summary id="resumen">Ajustes y clave de la IA</summary>
+    <div class="cuerpo">
+      <div id="pasos">
+        <p class="nota">Para que Rango pueda pensar necesita una clave gratuita de Google. Se consigue una sola vez:</p>
+        <ol>
+          <li>Entrá a <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> con una cuenta de Google.</li>
+          <li>Tocá "Create API key" (crear clave).</li>
+          <li>Copiá la clave y pegala acá abajo.</li>
+        </ol>
+      </div>
+      <div class="campo">
+        <label for="clave">Clave de Google (ya viene cargada en el archivo; pegá otra solo si querés cambiarla)</label>
+        <input type="password" id="clave" autocomplete="off" spellcheck="false" placeholder="Pegá la clave acá">
+      </div>
+      <div class="campo">
+        <label for="modelo">Modelo de IA</label>
+        <input type="text" id="modelo" autocomplete="off" spellcheck="false">
+        <p class="nota">Si el modelo no responde, la página prueba sola con otros de respaldo. Si querés cambiarlo, se hace acá.</p>
+      </div>
+      <div class="fila">
+        <button type="button" class="boton primario" id="guardar">Guardar y probar la clave</button>
+        <button type="button" class="boton" id="borrarClave">Borrar clave</button>
+      </div>
+      <div class="campo" id="campoVoz" hidden>
+        <label for="voz">Voz de Rango</label>
+        <select id="voz"></select>
+      </div>
+      <div class="campo">
+        <label for="velocidad">Velocidad al hablar: <span id="velocidadValor">1.0</span></label>
+        <input type="range" id="velocidad" min="0.7" max="1.3" step="0.1" value="1">
+      </div>
+      <div class="fila">
+        <button type="button" class="boton" id="probarVoz">Probar la voz</button>
+      </div>
+      <p class="nota">Música: decí "Hola Rango, poné cumbia de Los Palmeras" (o el artista o canción que quieras). Para que ande tiene que estar abierto con "Iniciar Rango". También entiende: pausá, seguí, siguiente, subí o bajá el volumen, y pará la música.</p>
+      <details class="registro" id="detalleRegistro">
+        <summary>Registro técnico (si algo falla, copialo y mandámelo)</summary>
+        <pre class="registro-texto" id="registro">Todavía no hay nada registrado.</pre>
+        <button type="button" class="boton" id="copiarRegistro">Copiar registro</button>
+      </details>
+      <p class="nota">En el plan gratuito, Google puede usar lo que se le pregunte para mejorar sus productos. Mejor no decir datos personales, contraseñas ni números de tarjeta.</p>
+    </div>
+  </details>
+</header>
+
+<main class="contenedor">
+  <h1 class="solo-lectores">Conversación con Rango</h1>
+  <section class="musica" id="musica" hidden aria-label="Reproductor de música">
+    <div class="musica-video"><div id="reproductor"></div></div>
+    <div class="musica-datos">
+      <p class="musica-etiqueta">Sonando en YouTube</p>
+      <p class="musica-titulo" id="musicaTitulo">—</p>
+      <div class="fila">
+        <button type="button" class="boton" id="musicaPausa">Pausar</button>
+        <button type="button" class="boton" id="musicaSiguiente">Siguiente</button>
+        <button type="button" class="boton" id="musicaCerrar">Detener</button>
+      </div>
+      <label class="musica-vol" for="musicaVolumen">Volumen de la música
+        <input type="range" id="musicaVolumen" min="0" max="100" step="5" value="50">
+      </label>
+    </div>
+  </section>
+  <noscript><p class="nota">Esta página necesita JavaScript activado para funcionar.</p></noscript>
+  <div id="historial" aria-live="polite"></div>
+  <p id="vivo" aria-hidden="true"></p>
+  <div class="sugerencias" id="sugerencias" role="group" aria-label="Preguntas de ejemplo"></div>
+</main>
+
+<footer>
+  <div class="contenedor controles">
+    <p class="estado" id="estado" role="status" aria-live="polite">Listo para escucharte</p>
+    <button type="button" id="manos" class="boton" aria-pressed="false"><span class="punto" aria-hidden="true"></span><span id="manosTexto">Manos libres: apagado</span></button>
+    <button type="button" id="mic" aria-pressed="false" aria-label="Hablar con Rango">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="3" width="6" height="12" rx="3"></rect>
+        <path d="M5 11a7 7 0 0 0 14 0"></path>
+        <path d="M12 18v3"></path>
+      </svg>
+    </button>
+    <div class="opciones">
+      <label><input type="checkbox" id="seguir"> Después de responder, seguir escuchando unos segundos</label>
+      <button type="button" id="callar">Callar</button>
+      <button type="button" id="limpiar">Borrar conversación</button>
+    </div>
+    <form class="escribir" id="formulario" autocomplete="off">
+      <label class="solo-lectores" for="texto">Escribir una pregunta</label>
+      <input type="search" id="texto" maxlength="2000" placeholder="O escribí tu pregunta acá">
+      <button type="submit" class="boton primario">Enviar</button>
+    </form>
+  </div>
+</footer>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---- Cosas que se pueden cambiar fácil ----
+  const NOMBRE = 'Rango';
+  // Clave de Google ya cargada, para no tener que pegarla cada vez.
+  // IMPORTANTE: este archivo contiene tu clave. No lo compartas ni lo subas a internet.
+  // Si algún día la querés cambiar, pegá otra en Ajustes (tiene prioridad sobre esta).
+  const CLAVE_INCLUIDA = '';
+  const MODELO_POR_DEFECTO = 'gemini-3.5-flash-lite';
+  const MODELOS_RESPALDO = ['gemini-3.8-flash', 'gemini-3.6-flash'];
+  const IDIOMA_VOZ = 'es-AR';
+  const MAX_MENSAJES_MEMORIA = 20;
+  const SEGUNDOS_SIN_HABLAR = 10;   // tras decir "Hola Rango", cuánto espera a que empieces a preguntar
+  const SEGUNDOS_DE_SEGUIMIENTO = 9; // con "seguir escuchando": cuánto espera una pregunta sin "Hola Rango"
+  // Frases que lo despiertan: un saludo + Rango (acepta cómo suele "oír" Chrome: ola, rengo, ringo, ran go...)
+  const LETRA = 'a-záéíóúüñ';
+  // Sin "lookbehind" (?<!...) para que también ande en navegadores de celular más viejos (Safari/iPhone, Samsung).
+  const DESPERTAR_RE = new RegExp('(^|[^' + LETRA + '])((?:hola|ola|hey|oye|che)[\\s,.!¡¿?-]*r[aei]n\\s?[gk][oó]s?)(?![' + LETRA + '])', 'i');
+  const DESPERTAR = {
+    test(t) { return DESPERTAR_RE.test(t); },
+    exec(t) {
+      const m = DESPERTAR_RE.exec(t);
+      if (!m) return null;
+      const r = [m[2]];
+      r.index = m.index + m[1].length;
+      r.input = t;
+      return r;
+    }
+  };
+  // iPhone/Safari solo deja hablar si antes hubo un toque del usuario: con el primer toque "destraba" la voz.
+  document.addEventListener('pointerdown', () => {
+    try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch { /* sin voz */ }
+  }, { once: true });
+  const SUGERENCIAS = ['¿Cómo preparo milanesas al horno?', 'Contame un chiste corto', '¿Qué día es hoy?', 'Poné música de Charly García'];
+
+  const INSTRUCCIONES_BASE = `Te llamás ${NOMBRE} (se te despierta diciendo "Hola ${NOMBRE}") y sos el asistente personal de una familia argentina que vive en una casa de dos pisos. ` +
+    `Lo que te llega viene de un reconocimiento de voz y puede tener errores de transcripción: si algo no tiene sentido, pedí con simpatía que lo repitan. ` +
+    `Hablás en español rioplatense, usando "vos", con un tono cálido, claro y directo. ` +
+    `Tus respuestas se leen en voz alta, así que respondé corto (de 2 a 4 oraciones, salvo que pidan una receta o una explicación larga), ` +
+    `sin viñetas, sin asteriscos, sin markdown, sin emojis y sin direcciones web. ` +
+    `Si piden una receta, nombrá primero los ingredientes y después contá los pasos con palabras como "primero", "después" y "por último". ` +
+    `Si no sabés algo o no estás seguro, decilo con honestidad. ` +
+    `Podés poner música de YouTube por los parlantes: la página lo hace sola cuando alguien dice "poné" seguido de una canción, un artista o un estilo (también pausar, seguir, cambiar de tema y subir o bajar el volumen). Si te piden música de una forma que no se entendió, pedí con simpatía que lo repitan con "poné" y el nombre. ` +
+    `Si te piden algo físico que todavía no podés hacer, como moverte o traer cosas, explicalo con simpatía: por ahora solo podés conversar.`;
+
+  function instrucciones() {
+    const ahora = new Date();
+    let fecha = '', hora = '';
+    try {
+      fecha = ahora.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      hora = ahora.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+    } catch { return INSTRUCCIONES_BASE; }
+    const suena = musicaActiva() && musica.titulo ? ` Ahora mismo suena en YouTube: "${musica.titulo}".` : '';
+    return `${INSTRUCCIONES_BASE} Fecha y hora actuales en la casa: ${fecha}, ${hora}.${suena}`;
+  }
+
+  // ---- Elementos de la página ----
+  const $ = (id) => document.getElementById(id);
+  const el = {
+    cara: $('cara'), estado: $('estado'), historial: $('historial'), vivo: $('vivo'), sugerencias: $('sugerencias'),
+    registro: $('registro'), detalleRegistro: $('detalleRegistro'), copiarRegistro: $('copiarRegistro'),
+    musica: $('musica'), musicaTitulo: $('musicaTitulo'), musicaPausa: $('musicaPausa'), musicaSiguiente: $('musicaSiguiente'),
+    musicaCerrar: $('musicaCerrar'), musicaVolumen: $('musicaVolumen'),
+    mic: $('mic'), manos: $('manos'), manosTexto: $('manosTexto'), seguir: $('seguir'), callar: $('callar'), limpiar: $('limpiar'),
+    formulario: $('formulario'), texto: $('texto'),
+    ajustes: $('ajustes'), resumen: $('resumen'), pasos: $('pasos'),
+    clave: $('clave'), modelo: $('modelo'), guardar: $('guardar'), borrarClave: $('borrarClave'),
+    campoVoz: $('campoVoz'), voz: $('voz'), velocidad: $('velocidad'), velocidadValor: $('velocidadValor'), probarVoz: $('probarVoz')
+  };
+
+  const memoria = [];
+  const app = {
+    escuchando: false, iniciando: false, hablando: false, pensando: false,
+    reconocimiento: null, voz: null, tokenVoz: 0, vigia: null,
+    modeloActivo: '', activoHasta: 0, listo: false,
+    // manos libres
+    manos: false, vigilando: false, oido: null, tokenOido: 0, fallosSeguidos: 0,
+    reinicio: null, esperaPregunta: null, silencio: null, ventanaHasta: 0,
+    despues: null, esperandoHasta: 0,
+    sinMicrofono: false, avisoSinMic: false, tokenManual: 0, cambioDisp: null, cambioEstado: Date.now(), desdeIniciando: 0, desdeEscuchando: 0, vigilandoDesde: 0, ultimoCambioDispositivo: 0
+  };
+  // ---- Registro técnico: guarda los últimos hechos para poder ver qué pasó si algo falla ----
+  const registro = [];
+  function bitacora(texto) {
+    const hora = new Date().toLocaleTimeString('es-AR', { hour12: false });
+    registro.push(`${hora} ${texto}`);
+    if (registro.length > 120) registro.shift();
+    if (el.detalleRegistro && el.detalleRegistro.open) mostrarRegistro();
+  }
+  function mostrarRegistro() {
+    el.registro.textContent = registro.length ? registro.join('\n') : 'Todavía no hay nada registrado.';
+    el.registro.scrollTop = el.registro.scrollHeight;
+  }
+  const musica = {
+    jugador: null, promesaApi: null, cola: [], pos: -1, consulta: '', titulo: '',
+    volumen: 50, bajado: false, pausada: false, errores: 0, arranque: null, bloqueado: false
+  };
+  document.title = `${NOMBRE}, asistente de voz`;
+  const enArchivo = location.protocol === 'file:';
+  // Solo una pestaña a la vez puede escuchar: si hay dos, se pelean por el micrófono y se traban.
+  const ID_PESTANA = Math.random().toString(36).slice(2);
+  const CLAVE_LIDER = 'rango_lider';
+
+  // ---- Guardado local (con try/catch por si el navegador lo bloquea) ----
+  const guardado = {
+    leer(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+    escribir(k, v) { try { localStorage.setItem(k, v); } catch { /* sin guardado */ } },
+    borrar(k) { try { localStorage.removeItem(k); } catch { /* sin guardado */ } }
+  };
+  function leerLider() {
+    try {
+      const o = JSON.parse(localStorage.getItem(CLAVE_LIDER) || 'null');
+      return o && Date.now() - o.t < 7000 ? o : null;
+    } catch { return null; }
+  }
+  function tomarLiderazgo() {
+    try { localStorage.setItem(CLAVE_LIDER, JSON.stringify({ id: ID_PESTANA, t: Date.now() })); } catch { /* sin guardado */ }
+  }
+  let claveEnMemoria = '';
+  const leerClave = () => guardado.leer('asistente_clave') || claveEnMemoria || limpiarClave(CLAVE_INCLUIDA);
+  const leerModelo = () => guardado.leer('asistente_modelo') || MODELO_POR_DEFECTO;
+  const leerVelocidad = () => {
+    const v = parseFloat(guardado.leer('asistente_velocidad'));
+    return v >= 0.7 && v <= 1.3 ? v : 1;
+  };
+  const limpiarClave = (c) => c.replace(/["'\s]/g, '').replace(/[^\x21-\x7E]/g, '');
+  const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---- Estado visual ----
+  function setEstado(nombre, texto) {
+    if (el.cara.dataset.estado !== nombre) app.cambioEstado = Date.now();
+    el.cara.dataset.estado = nombre;
+    el.estado.textContent = texto;
+    el.mic.setAttribute('aria-pressed', String(nombre === 'escuchando'));
+    el.mic.setAttribute('aria-label', nombre === 'escuchando' ? 'Dejar de escuchar' : 'Hablar con Rango');
+    reajustarMusica();
+  }
+  function textoReposo() {
+    if (!app.manos) return 'Listo para escucharte';
+    if (app.sinMicrofono) return 'No encuentro el micrófono. Conectalo y sigo solo.';
+    if (app.vigilando) return Date.now() < app.ventanaHasta ? 'Te escucho, seguí preguntando…' : `Manos libres: decí “Hola ${NOMBRE}”`;
+    return 'Manos libres encendido…';
+  }
+  function reposo() {
+    setEstado('reposo', textoReposo());
+    if (app.manos) reanudarVigilia(600);
+  }
+  function marcarAtento() {
+    el.cara.dataset.atento = app.manos && app.vigilando ? '1' : '0';
+  }
+  function irAlFinal() {
+    try { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' }); } catch { /* sin scroll */ }
+  }
+  function agregar(clase, texto) {
+    const d = document.createElement('div');
+    d.className = `burbuja ${clase}`;
+    d.textContent = texto;
+    el.historial.appendChild(d);
+    if (app.listo) requestAnimationFrame(irAlFinal);
+    return d;
+  }
+  const aviso = (t) => agregar('aviso', t);
+  const fallo = (t) => agregar('aviso error', t);
+
+  // ---- Boca: texto a voz ----
+  function vocesEspanol() {
+    const todas = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+    return todas.filter((x) => (x.lang || '').toLowerCase().startsWith('es'));
+  }
+  function elegirVoz() {
+    const todas = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+    const guardada = guardado.leer('asistente_voz');
+    if (guardada) {
+      const g = todas.find((x) => x.voiceURI === guardada || x.name === guardada);
+      if (g) return g;
+    }
+    const orden = [IDIOMA_VOZ, 'es-419', 'es-MX', 'es-US', 'es-ES'];
+    for (const cod of orden) {
+      const v = todas.find((x) => (x.lang || '').replace('_', '-').toLowerCase() === cod.toLowerCase());
+      if (v) return v;
+    }
+    return vocesEspanol()[0] || null;
+  }
+  function llenarVoces() {
+    if (!window.speechSynthesis) return;
+    const es = vocesEspanol();
+    app.voz = elegirVoz();
+    el.campoVoz.hidden = es.length === 0;
+    const actual = guardado.leer('asistente_voz');
+    el.voz.replaceChildren(
+      new Option('Automática (la mejor en español)', ''),
+      ...es.map((v) => new Option(`${v.name} (${v.lang})`, v.voiceURI))
+    );
+    el.voz.value = actual && es.some((v) => v.voiceURI === actual) ? actual : '';
+  }
+
+  const limpiarParaVoz = (t) => t
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '')
+    .replace(/[*_`#>~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  function trozos(t) {
+    const frases = t.replace(/([.!?…])\s+/g, '$1\u0001').split('\u0001').map((s) => s.trim()).filter(Boolean);
+    const salida = [];
+    for (const f of frases) {
+      let resto = f;
+      while (resto.length > 180) {
+        let corte = resto.lastIndexOf(', ', 180);
+        if (corte < 60) corte = resto.lastIndexOf(' ', 180);
+        if (corte < 1) corte = 180;
+        salida.push(resto.slice(0, corte + 1).trim());
+        resto = resto.slice(corte + 1).trim();
+      }
+      if (resto) salida.push(resto);
+    }
+    return salida;
+  }
+
+  function correrDespues() {
+    const f = app.despues;
+    app.despues = null;
+    if (f) { try { f(); } catch { /* nada */ } }
+  }
+  function hablar(texto, despues) {
+    correrDespues(); // si había algo pendiente de una charla anterior, que no se pierda
+    app.despues = despues || null;
+    if (!window.speechSynthesis) {
+      setEstado('reposo', 'Este navegador no puede hablar, pero la respuesta está escrita.');
+      correrDespues();
+      reposo();
+      return;
+    }
+    const partes = trozos(limpiarParaVoz(texto));
+    pausarVigilia(); // mientras habla, el oído se apaga para que no se escuche a sí mismo
+    clearTimeout(app.vigia);
+    speechSynthesis.cancel();
+    if (!partes.length) { app.hablando = false; reposo(); correrDespues(); return; }
+
+    const token = ++app.tokenVoz;
+    const velocidad = leerVelocidad();
+    app.hablando = true;
+    setEstado('hablando', 'Hablando…');
+    if (!app.voz) app.voz = elegirVoz();
+
+    let pendientes = partes.length;
+    const alTerminarTrozo = () => {
+      if (token !== app.tokenVoz) return;
+      pendientes -= 1;
+      if (pendientes <= 0) terminarDeHablar(token);
+    };
+    // Pequeña pausa después de cancelar: Chrome a veces se "come" lo primero que se le manda enseguida.
+    setTimeout(() => {
+      if (token !== app.tokenVoz) return;
+      try { speechSynthesis.resume(); } catch { /* nada */ }
+      for (const p of partes) {
+        const u = new SpeechSynthesisUtterance(p);
+        u.lang = app.voz ? app.voz.lang : IDIOMA_VOZ;
+        if (app.voz) u.voice = app.voz;
+        u.rate = velocidad;
+        u.onend = alTerminarTrozo;
+        u.onerror = alTerminarTrozo;
+        speechSynthesis.speak(u);
+      }
+    }, 80);
+    // Vigía: si el navegador nunca avisa que terminó, no nos quedamos trabados.
+    const estimado = (partes.join(' ').length * 95) / velocidad + 6000;
+    app.vigia = setTimeout(() => terminarDeHablar(token), estimado);
+  }
+  function terminarDeHablar(token) {
+    if (token !== app.tokenVoz || !app.hablando) return;
+    clearTimeout(app.vigia);
+    app.hablando = false;
+    const esperaCancion = Date.now() < app.esperandoHasta;
+    const seguir = el.seguir.checked || esperaCancion;
+    if (app.manos) {
+      app.ventanaHasta = seguir ? Date.now() + SEGUNDOS_DE_SEGUIMIENTO * 1000 : 0;
+      if (seguir) setTimeout(reajustarMusica, SEGUNDOS_DE_SEGUIMIENTO * 1000 + 400);
+      if (!app.escuchando && !app.pensando) reposo();
+      correrDespues();
+      reanudarVigilia(700);
+      return;
+    }
+    if (!app.escuchando && !app.pensando) reposo();
+    correrDespues();
+    if (seguir) setTimeout(escuchar, 500);
+  }
+  function callar() {
+    app.tokenVoz += 1;
+    clearTimeout(app.vigia);
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    app.hablando = false;
+    if (!app.escuchando && !app.pensando) reposo();
+    correrDespues();
+  }
+
+  // ---- Oído: voz a texto ----
+  const Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  async function explicarPermisoMicrofono() {
+    const base = 'No tengo permiso para usar el micrófono.';
+    if (window.top !== window.self) {
+      return `${base} Parece que la página está dentro de otra aplicación. Abrí el archivo directamente en Chrome (clic derecho, Abrir con, Chrome).`;
+    }
+    let estado = '';
+    try { estado = (await navigator.permissions.query({ name: 'microphone' })).state; } catch { /* no disponible */ }
+    if (estado === 'denied') {
+      return `${base} Chrome lo tiene bloqueado para esta página: tocá el ícono a la izquierda de la dirección, poné Micrófono en "Permitir" y recargá con F5.`;
+    }
+    return `${base} Cuando Chrome pregunte, elegí "Permitir". Si no aparece ningún cartel, revisá que el micrófono esté habilitado en la configuración de la computadora.`;
+  }
+
+  function reiniciarManual() {
+    app.tokenManual += 1;
+    try { app.reconocimiento && app.reconocimiento.abort(); } catch { /* nada */ }
+    app.reconocimiento = null;
+    app.iniciando = false;
+    app.escuchando = false;
+    el.vivo.textContent = '';
+    reposo();
+  }
+  function escuchar() {
+    if (!Reconocimiento) {
+      aviso('Este navegador no entiende la voz. Probá con Chrome o Edge, o escribí la pregunta abajo.');
+      return;
+    }
+    if (app.escuchando || app.iniciando) {
+      const actual = app.tokenManual;
+      try { app.reconocimiento && app.reconocimiento.stop(); } catch { /* ya estaba parado */ }
+      // Si el micrófono se desconectó, Chrome a veces nunca avisa que terminó: no nos quedamos trabados.
+      setTimeout(() => {
+        if (actual === app.tokenManual && (app.escuchando || app.iniciando)) { bitacora('micrófono manual trabado: lo reinicio'); reiniciarManual(); }
+      }, 1500);
+      return;
+    }
+    if (app.pensando) { setEstado('pensando', 'Todavía estoy pensando, un momento…'); return; }
+    pausarVigilia();
+    callar();
+
+    const r = new Reconocimiento();
+    r.lang = IDIOMA_VOZ;
+    r.interimResults = true;
+    r.continuous = false;
+    r.maxAlternatives = 1;
+    let final = '';
+    let huboError = false;
+    const mio = ++app.tokenManual;
+    app.iniciando = true;
+    app.desdeIniciando = Date.now();
+
+    r.onstart = () => { if (mio !== app.tokenManual) return; app.iniciando = false; app.escuchando = true; app.desdeEscuchando = Date.now(); setEstado('escuchando', 'Escuchando… hablá ahora'); };
+    r.onresult = (e) => {
+      if (mio !== app.tokenManual) return;
+      let parcial = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t; else parcial += t;
+      }
+      el.vivo.textContent = (final + parcial).trim();
+    };
+    r.onerror = (e) => {
+      if (mio !== app.tokenManual) return;
+      huboError = true;
+      if (e.error !== 'aborted') bitacora(`micrófono manual error: ${e.error}`);
+      if (e.error === 'aborted') return;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        explicarPermisoMicrofono().then(aviso);
+        return;
+      }
+      const mensajes = {
+        'no-speech': 'No escuché nada. Probá de nuevo y hablá un poquito más cerca del micrófono.',
+        'audio-capture': 'No encuentro ningún micrófono conectado. Conectalo y tocá de nuevo.',
+        'network': 'Falló la conexión a internet y no pude entender la voz.',
+        'language-not-supported': 'Este navegador no entiende español de Argentina para la voz.'
+      };
+      aviso(mensajes[e.error] || `Hubo un problema con el micrófono (${e.error}).`);
+    };
+    r.onend = () => {
+      if (mio !== app.tokenManual) return;
+      app.iniciando = false;
+      app.escuchando = false;
+      el.vivo.textContent = '';
+      const dicho = final.trim();
+      if (dicho) preguntar(dicho);
+      else { reposo(); if (!huboError) aviso('No llegué a escuchar nada.'); }
+    };
+    app.reconocimiento = r;
+    try { r.start(); } catch { app.iniciando = false; reposo(); aviso('No pude encender el micrófono. Probá de nuevo.'); }
+  }
+
+  // ---- Música de YouTube ----
+  const musicaActiva = () => !!musica.jugador && musica.cola.length > 0;
+  function responder(texto, despues) {
+    agregar('robot', texto);
+    hablar(texto, despues);
+  }
+  function aplicarVolumenMusica() {
+    if (!musica.jugador || !musica.jugador.setVolume) return;
+    try { musica.jugador.setVolume(musica.bajado ? Math.min(musica.volumen, 12) : musica.volumen); } catch { /* aún no listo */ }
+  }
+  // Mientras Rango escucha, piensa o habla, la música baja para que se oigan bien.
+  function reajustarMusica() {
+    const bajar = el.cara.dataset.estado !== 'reposo' || Date.now() < app.ventanaHasta;
+    if (musica.bajado === bajar) return;
+    musica.bajado = bajar;
+    aplicarVolumenMusica();
+  }
+  function actualizarBotonPausa() {
+    el.musicaPausa.textContent = musica.pausada ? 'Seguir' : 'Pausar';
+  }
+
+  function cargarApiYoutube() {
+    if (window.YT && window.YT.Player) return Promise.resolve();
+    if (musica.promesaApi) return musica.promesaApi;
+    musica.promesaApi = new Promise((ok, no) => {
+      const previa = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { try { if (previa) previa(); } catch { /* nada */ } ok(); };
+      const s = document.createElement('script');
+      s.src = 'https://www.youtube.com/iframe_api';
+      s.onerror = () => { musica.promesaApi = null; no(new Error('api')); };
+      document.head.appendChild(s);
+      setTimeout(() => { if (!(window.YT && window.YT.Player)) { musica.promesaApi = null; no(new Error('api-lenta')); } }, 12000);
+    });
+    return musica.promesaApi;
+  }
+  async function asegurarJugador() {
+    await cargarApiYoutube();
+    if (musica.jugador) return;
+    await new Promise((ok, no) => {
+      const reloj = setTimeout(() => { musica.jugador = null; no(new Error('jugador')); }, 12000);
+      musica.jugador = new window.YT.Player('reproductor', {
+        width: '100%', height: '100%',
+        playerVars: { playsinline: 1, rel: 0, enablejsapi: 1, origin: location.origin },
+        events: {
+          onReady: () => { clearTimeout(reloj); ok(); },
+          onStateChange: alCambiarEstadoMusica,
+          onError: alFallarVideo,
+          onAutoplayBlocked: () => { musica.bloqueado = true; aviso('El navegador no me dejó empezar solo. Tocá el botón de play del reproductor (una sola vez; después ya anda).'); }
+        }
+      });
+    });
+  }
+
+  async function buscarVideos(consulta) {
+    if (enArchivo) throw { musica: 'archivo' };
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), 20000);
+    try {
+      const resp = await fetch('/buscar?q=' + encodeURIComponent(consulta), { signal: control.signal });
+      if (resp.status === 404) throw { musica: 'servidor-viejo' };
+      if (!resp.ok) throw { musica: 'busqueda' };
+      const datos = await resp.json();
+      return Array.isArray(datos) ? datos.filter((v) => v && /^[\w-]{11}$/.test(v.id)) : [];
+    } finally {
+      clearTimeout(reloj);
+    }
+  }
+  function textoErrorMusica(e) {
+    if (e && e.musica === 'archivo') return 'Para poner música tengo que estar abierto con "Iniciar Rango" (la ventana negra), no directamente desde el archivo.';
+    if (e && e.musica === 'servidor-viejo') return 'Para poner música hay que reiniciar a Rango: cerrá la ventana negra y abrí de nuevo "Iniciar Rango".';
+    if (e && e.musica === 'busqueda') return 'No pude buscar en YouTube en este momento. Probá de nuevo en un rato.';
+    if (navigator.onLine === false) return 'Parece que no hay internet, así que no puedo buscar música.';
+    return 'No pude buscar en YouTube ahora. Probá de nuevo en un rato.';
+  }
+
+  async function ponerMusica(consulta) {
+    const corta = consulta.length > 70 ? consulta.slice(0, 70) : consulta;
+    app.pensando = true;
+    setEstado('pensando', 'Buscando en YouTube…');
+    let lista;
+    try {
+      lista = await buscarVideos(consulta);
+    } catch (e) {
+      app.pensando = false;
+      responder(textoErrorMusica(e));
+      return;
+    }
+    if (!lista.length) { app.pensando = false; responder(`No encontré nada para ${corta} en YouTube. Probá con otro nombre.`); return; }
+    setEstado('pensando', 'Cargando el reproductor…');
+    el.musica.hidden = false; // tiene que estar a la vista para que YouTube lo deje andar
+    try {
+      await asegurarJugador();
+    } catch {
+      app.pensando = false;
+      el.musica.hidden = true;
+      responder('No pude cargar el reproductor de YouTube. Revisá la conexión a internet y probá de nuevo.');
+      return;
+    }
+    app.pensando = false;
+    musica.cola = lista;
+    musica.pos = 0;
+    musica.consulta = consulta;
+    musica.errores = 0;
+    responder(`Dale, pongo ${corta}.`, reproducirActual);
+  }
+  function reproducirActual() {
+    const v = musica.cola[musica.pos];
+    if (!v || !musica.jugador) return;
+    musica.titulo = v.titulo || musica.consulta;
+    el.musicaTitulo.textContent = musica.titulo;
+    musica.pausada = false;
+    musica.bloqueado = false;
+    actualizarBotonPausa();
+    try { musica.jugador.loadVideoById(v.id); } catch { alFallarVideo(); return; }
+    aplicarVolumenMusica();
+    clearTimeout(musica.arranque);
+    musica.arranque = setTimeout(() => {
+      let estado = -2;
+      try { estado = musica.jugador.getPlayerState(); } catch { /* nada */ }
+      if (musicaActiva() && !musica.bloqueado && estado !== 1 && estado !== 3 && estado !== 2) {
+        aviso('Si no suena, tocá el botón de play del reproductor: a veces el navegador pide un toque para empezar.');
+      }
+    }, 6000);
+  }
+  function alCambiarEstadoMusica(e) {
+    if (!e) return;
+    if (e.data === 1) { musica.pausada = false; musica.errores = 0; aplicarVolumenMusica(); }
+    else if (e.data === 2) musica.pausada = true;
+    else if (e.data === 0) { siguienteTema(true); return; }
+    actualizarBotonPausa();
+  }
+  function alFallarVideo() {
+    musica.errores += 1;
+    if (musica.errores >= 4 || musica.pos + 1 >= musica.cola.length) {
+      detenerMusica();
+      aviso('No pude reproducir esos videos (algunos no permiten que se pasen fuera de YouTube). Probá pidiendo otra cosa.');
+      return;
+    }
+    siguienteTema(true);
+  }
+  function siguienteTema(automatico) {
+    if (!musicaActiva()) return false;
+    if (musica.pos + 1 >= musica.cola.length) {
+      if (automatico) { musica.pausada = true; actualizarBotonPausa(); } // terminó la lista
+      return false;
+    }
+    musica.pos += 1;
+    reproducirActual();
+    return true;
+  }
+  function pausarMusica() {
+    if (!musicaActiva()) return false;
+    try { musica.jugador.pauseVideo(); } catch { return false; }
+    musica.pausada = true; actualizarBotonPausa();
+    return true;
+  }
+  function seguirMusica() {
+    if (!musicaActiva()) return false;
+    try { musica.jugador.playVideo(); } catch { return false; }
+    musica.pausada = false; actualizarBotonPausa();
+    return true;
+  }
+  function detenerMusica() {
+    clearTimeout(musica.arranque);
+    if (musica.jugador) { try { musica.jugador.stopVideo(); } catch { /* nada */ } }
+    musica.cola = [];
+    musica.pos = -1;
+    musica.titulo = '';
+    musica.pausada = false;
+    el.musica.hidden = true;
+  }
+  function cambiarVolumenMusica(valor) {
+    musica.volumen = Math.max(0, Math.min(100, Math.round(valor)));
+    el.musicaVolumen.value = String(musica.volumen);
+    guardado.escribir('asistente_volumen_musica', String(musica.volumen));
+    aplicarVolumenMusica();
+  }
+
+  // ---- Entender los pedidos de música (sin gastar la IA) ----
+  // Se compara todo sin tildes (así "pará" y "para" valen igual); lo que se busca en YouTube conserva los tildes.
+  const sinTildes = (t) => t.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const PEDIDO_VACIO = /^(?:musica|musiquita|algo|algo de musica|una cancion|un tema|algun tema|youtube|musica de youtube)?$/;
+  function limpiarConsulta(texto) {
+    // trabaja sobre dos copias iguales en largo: una sin tildes para reconocer palabras y otra con tildes para devolver
+    let o = texto.toLowerCase();
+    let t = sinTildes(o);
+    const quitar = (re) => {
+      let m;
+      while ((m = re.exec(t))) { t = t.slice(0, m.index) + ' ' + t.slice(m.index + m[0].length); o = o.slice(0, m.index) + ' ' + o.slice(m.index + m[0].length); re.lastIndex = 0; }
+    };
+    quitar(/\b(?:en|de|por|desde|con)\s+(?:el\s+)?youtube\b/);
+    quitar(/\byoutube\b/);
+    quitar(/\b(?:por favor|porfa|ahora|ya|nomas|que suene|para escuchar)\b/);
+    const recortar = (re) => { const m = re.exec(t); if (m) { t = t.slice(m[0].length); o = o.slice(m[0].length); } };
+    recortar(/^\s+/);
+    recortar(/^(?:la|el|las|los|una|un|algo|alguna|algun|unas|unos)\s+/);
+    recortar(/^(?:de|del)\s+/);
+    return o.replace(/\s+/g, ' ').trim();
+  }
+  function controlDeMusica(t) {
+    const num = /\bvolumen\s+(?:al?|en)\s+(\d{1,3})\b/.exec(t);
+    if (num) return { tipo: 'volumen', valor: Math.min(100, Number(num[1])) };
+    const objeto = '(?:musica|musiquita|cancion|tema|video|youtube|reproductor|reproduccion)';
+    if (new RegExp(`\\b(?:para|parar|pare|apaga|apagar|detene|detener|corta|cortar|saca|sacar)\\b.*\\b${objeto}\\b`).test(t)
+      || /^(?:para|stop|basta|apaga|corta)(?:\s+(?:por favor|ya|ahora))?$/.test(t)
+      || /\bno quiero mas musica\b/.test(t) || /\bdeja de (?:poner|tocar|reproducir)\b/.test(t)) return { tipo: 'detener' };
+    if (/^pausa(?:r)?\b/.test(t) || new RegExp(`\\bpausar? (?:la )?${objeto}\\b`).test(t)) return { tipo: 'pausa' };
+    if (/^(?:segui|continua|reanuda|despausa|play|dale play|volve a poner)\b/.test(t)
+      || new RegExp(`\\b(?:segui|continua|reanuda) (?:con )?(?:la )?${objeto}\\b`).test(t)) return { tipo: 'seguir' };
+    if (/\b(?:siguiente|proxim[oa]|otra cancion|otro tema|otra musica|salta|saltea|cambia(?:le)? (?:la |de )?(?:cancion|tema|musica))\b/.test(t)) return { tipo: 'siguiente' };
+    if (/\b(?:subi(?:le)?|aumenta(?:le)?|mas fuerte|mas alto)\b/.test(t)) return { tipo: 'volumen', delta: 15 };
+    if (/\b(?:baja(?:le)?|mas bajo|mas despacio|menos fuerte|disminui)\b/.test(t)) return { tipo: 'volumen', delta: -15 };
+    return null;
+  }
+  function interpretarMusica(original) {
+    let o = original.toLowerCase().replace(/[¿?¡!.,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+    let t = sinTildes(o);
+    if (!t) return null;
+    if (musicaActiva()) {
+      const c = controlDeMusica(t);
+      if (c) return c;
+    }
+    const recortar = (re) => { const m = re.exec(t); if (m) { t = t.slice(m[0].length); o = o.slice(m[0].length); } };
+    recortar(/^(?:(?:hola|che|dale|rango|ey|oye|bueno|ah|y|entonces|por favor|porfa|ahora|mira)\s+)+/);
+    recortar(/^(?:(?:me|nos)\s+)?(?:podes|podrias|podria|puedes|queres|quisiera que|quiero que|te pido que)\s+/);
+    recortar(/^(?:quiero|queremos|quisiera|me gustaria|tengo ganas de|tenemos ganas de)\s+(?=escuchar|oir)/);
+    const m = /^(pone(?:me|te|nos|lo|la)?|poner|pongas|pondrias?|reproduci(?:me)?|reproducir|reproduzcas|escuchar|escuchemos|oir|toca(?:me)?|tocar|toques|pasame|busca(?:me)?|buscar)(?:\s+(.*))?$/.exec(t);
+    if (!m) return null;
+    const verbo = m[1];
+    const resto = (m[2] || '').trim();
+    const resto0 = o.slice(o.length - resto.length); // el mismo resto, con tildes
+    const sePone = /^(?:pon|poner|pongas|pondr)/.test(verbo);
+    const directo = /^(?:reproduc|escuchar|escuchemos|oir)/.test(verbo);
+    const pideAlgo = /^(?:toc|pas|busc)/.test(verbo);
+    const cueFuerte = /\b(?:musica|musiquita|cancion|canciones|tema|temas|temazo|disco|album|playlist|youtube|radio|lofi|lo-fi|cumbia|rock|cuarteto|tango|folklore|folclore|jazz|reggaeton|reguet[oó]n|trap|salsa|clasica|rap|electronica|karaoke|instrumental|video|clip)\b/.test(resto);
+    const cueFlojo = cueFuerte || /^(?:algo|alguna|algun|una|un|unas|unos|otra|otro|de|del)\b/.test(resto);
+    if (sePone && /^a\b/.test(resto)) return null; // "ponete a trabajar"
+    if (!(directo || sePone) && !cueFuerte) return null;
+    if (sePone && !cueFlojo) return null;
+    const consulta = limpiarConsulta(resto0);
+    if (PEDIDO_VACIO.test(sinTildes(consulta))) return pideAlgo ? null : { tipo: 'pedirCancion' };
+    return { tipo: 'reproducir', consulta };
+  }
+
+  async function ejecutarMusica(orden) {
+    switch (orden.tipo) {
+      case 'reproducir':
+        await ponerMusica(orden.consulta);
+        break;
+      case 'pedirCancion':
+        app.esperandoHasta = Date.now() + 25000;
+        responder('¿Qué querés escuchar? Decime una canción, un artista o un estilo.');
+        break;
+      case 'detener':
+        if (musicaActiva()) { detenerMusica(); responder('Listo, paré la música.'); }
+        else responder('No hay música sonando.');
+        break;
+      case 'pausa':
+        responder(pausarMusica() ? 'Pausada.' : 'No hay música sonando.');
+        break;
+      case 'seguir':
+        responder(seguirMusica() ? 'Dale, sigo.' : 'No hay música para seguir.');
+        break;
+      case 'siguiente':
+        responder(siguienteTema(false) ? 'Va la siguiente.' : 'Ya no hay más temas en esta lista. Pedime otra música.');
+        break;
+      case 'volumen':
+        cambiarVolumenMusica(orden.valor !== undefined ? orden.valor : musica.volumen + orden.delta);
+        responder(orden.valor !== undefined ? `Volumen de la música al ${musica.volumen}.` : 'Listo.');
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ---- Manos libres: queda atento y se despierta con "Hola Rango" ----
+  const AYUDA_ARCHIVO = 'Ojo: como la página está abierta directamente desde el archivo, Chrome puede volver a pedir permiso del micrófono cada tanto. Con "Iniciar Rango" el permiso se da una sola vez.';
+  let avisoArchivoDado = false;
+  let audio = null;
+  function prepararSonido() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+    } catch { audio = null; }
+  }
+  function pip(frecuencia, duracion) {
+    try {
+      if (!audio) return;
+      const t = audio.currentTime;
+      const o = audio.createOscillator();
+      const g = audio.createGain();
+      o.type = 'sine';
+      o.frequency.value = frecuencia;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.12, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + duracion);
+      o.connect(g);
+      g.connect(audio.destination);
+      o.start(t);
+      o.stop(t + duracion + 0.03);
+    } catch { /* sin sonido */ }
+  }
+
+  function limpiarTemporizadores() {
+    clearTimeout(app.esperaPregunta);
+    clearTimeout(app.silencio);
+    app.esperaPregunta = null;
+    app.silencio = null;
+  }
+  function pausarVigilia() {
+    app.tokenOido += 1; // lo que diga el reconocedor viejo desde ahora se ignora
+    clearTimeout(app.reinicio);
+    app.reinicio = null;
+    limpiarTemporizadores();
+    const r = app.oido;
+    app.oido = null;
+    app.vigilando = false;
+    if (r) { try { r.abort(); } catch { /* ya estaba parado */ } }
+    marcarAtento();
+  }
+  function reanudarVigilia(demora) {
+    if (!app.manos) return;
+    clearTimeout(app.reinicio);
+    app.reinicio = setTimeout(() => {
+      app.reinicio = null;
+      if (!app.manos || app.vigilando || app.hablando || app.pensando || app.escuchando || app.iniciando) return;
+      vigilar();
+    }, demora);
+  }
+  function mejorAlternativa(resultado) {
+    for (let k = 0; k < resultado.length; k++) {
+      if (DESPERTAR.test(resultado[k].transcript)) return resultado[k].transcript;
+    }
+    return resultado[0].transcript;
+  }
+  const sinRelleno = (t) => t.replace(/^[\s,.:;-]+/, '').trim();
+
+  function vigilar() {
+    if (!Reconocimiento || !app.manos) return;
+    pausarVigilia();
+    const mio = app.tokenOido;
+    const vigente = () => mio === app.tokenOido;
+    const r = new Reconocimiento();
+    app.oido = r;
+    r.lang = IDIOMA_VOZ;
+    r.continuous = true;
+    r.interimResults = true;
+    r.maxAlternatives = 3;
+
+    const inicio = Date.now();
+    let desde = 0;          // desde qué resultado miramos (lo anterior ya se descartó)
+    let despierto = false;  // ya dijo "Hola Rango" (o estamos en seguimiento)
+    let porSaludo = false;  // se despertó con la frase
+    let despues = '';       // lo que dijo después de despertarlo
+    let hubo = false;
+    let huboSinMicrofono = false;
+
+    const enviar = () => {
+      if (!vigente()) return;
+      const pregunta = sinRelleno(despues);
+      el.vivo.textContent = '';
+      pausarVigilia(); // apaga este oído y limpia los temporizadores
+      if (pregunta.length < 2) { reanudarVigilia(300); return; }
+      preguntar(pregunta);
+    };
+
+    r.onstart = () => {
+      if (!vigente()) return;
+      app.vigilando = true;
+      app.vigilandoDesde = Date.now();
+      marcarAtento();
+      // Si en 2,5 segundos no hubo error de micrófono, es que volvió: dejamos de mostrar el aviso.
+      setTimeout(() => {
+        if (vigente() && !huboSinMicrofono && app.sinMicrofono) {
+          app.sinMicrofono = false;
+          app.avisoSinMic = false;
+          bitacora('el micrófono volvió');
+          if (el.cara.dataset.estado === 'reposo') setEstado('reposo', textoReposo());
+        }
+      }, 2500);
+      if (el.cara.dataset.estado === 'reposo' || (el.cara.dataset.estado === 'escuchando' && !app.escuchando)) setEstado('reposo', textoReposo());
+    };
+    r.onresult = (e) => {
+      if (!vigente()) return;
+      hubo = true;
+      app.fallosSeguidos = 0;
+      app.sinMicrofono = false;
+      let texto = '';
+      let ultimoFinal = false;
+      for (let i = desde; i < e.results.length; i++) {
+        texto += ' ' + mejorAlternativa(e.results[i]);
+        ultimoFinal = e.results[i].isFinal;
+      }
+      texto = texto.trim();
+      const m = DESPERTAR.exec(texto);
+
+      if (!despierto) {
+        const enSeguimiento = Date.now() < app.ventanaHasta;
+        if (!m && !enSeguimiento) {
+          if (ultimoFinal) desde = e.results.length; // no era para mí: me olvido de lo ya oído
+          return;
+        }
+        despierto = true;
+        if (m) { porSaludo = true; pip(880, 0.12); }
+        setEstado('escuchando', m ? 'Te escucho… decime' : 'Te escucho…');
+        app.esperaPregunta = setTimeout(() => {
+          if (!vigente() || sinRelleno(despues)) return;
+          pip(330, 0.18); // no dijo nada: vuelvo a esperar el saludo
+          pausarVigilia();
+          reanudarVigilia(200);
+        }, SEGUNDOS_SIN_HABLAR * 1000);
+      }
+
+      if (m) despues = texto.slice(m.index + m[0].length);
+      else if (!porSaludo) despues = texto;
+      const pregunta = sinRelleno(despues);
+      if (pregunta) {
+        clearTimeout(app.esperaPregunta);
+        el.vivo.textContent = pregunta;
+        clearTimeout(app.silencio);
+        app.silencio = setTimeout(enviar, ultimoFinal ? 700 : 1800);
+      }
+    };
+    r.onerror = (e) => {
+      if (!vigente()) return;
+      const c = e.error;
+      if (c !== 'aborted') bitacora(`vigilia error: ${c}`);
+      if (c === 'no-speech' || c === 'aborted') return;
+      if (c === 'not-allowed' || c === 'service-not-allowed') {
+        apagarManos();
+        explicarPermisoMicrofono().then((t) => aviso(enArchivo ? `${t} ${AYUDA_ARCHIVO}` : t));
+        return;
+      }
+      if (c === 'audio-capture') {
+        // El micrófono se desconectó: no apago nada, espero y sigo solo apenas vuelva.
+        huboSinMicrofono = true;
+        app.sinMicrofono = true;
+        if (!app.avisoSinMic) { app.avisoSinMic = true; aviso('No encuentro el micrófono. Cuando lo conectes, sigo escuchando solo.'); }
+        if (el.cara.dataset.estado === 'reposo') setEstado('reposo', textoReposo());
+        return;
+      }
+      if (c === 'language-not-supported') { apagarManos(); aviso('Este navegador no entiende español de Argentina para la voz.'); return; }
+      if (c === 'network' && el.cara.dataset.estado === 'reposo') el.estado.textContent = 'Sin conexión con el reconocimiento de voz; sigo reintentando…';
+      app.fallosSeguidos += 1; // red u otros problemas pasajeros
+    };
+    r.onend = () => {
+      if (!vigente()) return;
+      app.vigilando = false;
+      app.oido = null;
+      marcarAtento();
+      if (despierto && sinRelleno(despues)) { enviar(); return; } // se cortó justo cuando terminaba de preguntar
+      limpiarTemporizadores();
+      el.vivo.textContent = '';
+      if (el.cara.dataset.estado === 'escuchando' && !app.escuchando) setEstado('reposo', textoReposo());
+      if (huboSinMicrofono) { // sin micrófono: reintento cada 3 segundos, sin rendirme
+        app.fallosSeguidos = 0;
+        reanudarVigilia(3000);
+        return;
+      }
+      if (!hubo && Date.now() - inicio < 1200) app.fallosSeguidos += 1;
+      if (app.fallosSeguidos >= 25) {
+        apagarManos();
+        aviso('El reconocimiento de voz falló muchas veces seguidas, así que apagué el modo manos libres. Volvé a encenderlo cuando quieras.');
+        return;
+      }
+      reanudarVigilia(app.fallosSeguidos ? Math.min(15000, 500 * 2 ** Math.min(app.fallosSeguidos, 5)) : 250);
+    };
+    try { r.start(); } catch {
+      app.oido = null;
+      bitacora('no pude arrancar la vigilia; reintento');
+      app.fallosSeguidos += 1;
+      if (app.fallosSeguidos >= 25) { apagarManos(); aviso('No pude encender el micrófono. Probá de nuevo.'); }
+      else reanudarVigilia(Math.min(15000, 1000 * 2 ** Math.min(app.fallosSeguidos, 4)));
+    }
+  }
+
+  function actualizarManos() {
+    el.manos.setAttribute('aria-pressed', String(app.manos));
+    el.manosTexto.textContent = app.manos ? 'Manos libres: encendido' : 'Manos libres: apagado';
+    marcarAtento();
+  }
+  function apagarManos(silencioso) {
+    app.manos = false;
+    app.ventanaHasta = 0;
+    app.fallosSeguidos = 0;
+    app.sinMicrofono = false;
+    app.avisoSinMic = false;
+    bitacora(silencioso ? 'manos libres apagado (lo tomó otra pestaña)' : 'manos libres apagado');
+    if (!silencioso) guardado.escribir('asistente_manos', '0');
+    pausarVigilia();
+    el.vivo.textContent = '';
+    actualizarManos();
+    if (!app.escuchando && !app.pensando && !app.hablando) reposo();
+  }
+  function encenderManos() {
+    if (!Reconocimiento) { aviso('Este navegador no entiende la voz. Para hablar usá Chrome o Edge.'); return; }
+    prepararSonido();
+    app.manos = true;
+    app.fallosSeguidos = 0;
+    app.sinMicrofono = false;
+    app.avisoSinMic = false;
+    tomarLiderazgo(); // si había otra pestaña de Rango escuchando, esta le toma el micrófono
+    bitacora('manos libres encendido');
+    try {
+      navigator.permissions.query({ name: 'microphone' }).then((p) => {
+        bitacora(`permiso de micrófono: ${p.state}`);
+        p.onchange = () => bitacora(`permiso de micrófono cambió a: ${p.state}`);
+      }).catch(() => {});
+    } catch { /* sin permisos api */ }
+    guardado.escribir('asistente_manos', '1');
+    actualizarManos();
+    if (!app.escuchando && !app.pensando && !app.hablando) setEstado('reposo', textoReposo());
+    aviso(`Manos libres encendido. Decí “Hola ${NOMBRE}” y después tu pregunta.`);
+    if (enArchivo && !avisoArchivoDado) { avisoArchivoDado = true; aviso(AYUDA_ARCHIVO); }
+    reanudarVigilia(50);
+  }
+
+  // Si el micrófono se desconecta o se vuelve a conectar, se reinicia la escucha (Chrome se queda con el dispositivo viejo).
+  function alCambiarDispositivos() {
+    clearTimeout(app.cambioDisp);
+    app.cambioDisp = setTimeout(() => {
+      bitacora('cambió un dispositivo de audio (micrófono conectado o desconectado)');
+      app.sinMicrofono = false;
+      app.avisoSinMic = false;
+      app.fallosSeguidos = 0;
+      if (app.manos && !app.hablando && !app.pensando && !app.escuchando && !app.iniciando) {
+        pausarVigilia();
+        if (el.cara.dataset.estado === 'reposo') setEstado('reposo', textoReposo());
+        reanudarVigilia(400);
+      }
+    }, 800);
+  }
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) navigator.mediaDevices.addEventListener('devicechange', alCambiarDispositivos);
+  } catch { /* sin aviso de dispositivos */ }
+
+  // Latido: cada 5 segundos revisa que nada esté trabado y, si lo está, lo destraba solo.
+  function latido() {
+    const ahora = Date.now();
+    if (app.manos) {
+      const lider = leerLider();
+      if (lider && lider.id !== ID_PESTANA) {
+        apagarManos(true);
+        aviso('Otra pestaña de Rango tomó el micrófono, así que acá lo apagué.');
+        return;
+      }
+      tomarLiderazgo();
+    }
+    if (app.pensando && ahora - app.cambioEstado > 200000) { bitacora('pensando trabado: lo destrabo'); app.pensando = false; reposo(); }
+    if (app.iniciando && ahora - app.desdeIniciando > 20000) { bitacora('micrófono manual sin arrancar: lo destrabo'); reiniciarManual(); }
+    if (app.escuchando && ahora - app.desdeEscuchando > 70000) { bitacora('micrófono manual demasiado largo: lo destrabo'); reiniciarManual(); }
+    if (app.vigilando && ahora - app.vigilandoDesde > 110000) { bitacora('vigilia muy larga: la reinicio'); pausarVigilia(); reanudarVigilia(150); return; }
+    if (app.manos && !app.vigilando && !app.reinicio && !app.hablando && !app.pensando && !app.escuchando && !app.iniciando) {
+      bitacora('la vigilia estaba detenida sin motivo: la reanudo');
+      reanudarVigilia(0);
+    }
+  }
+  setInterval(latido, 5000);
+
+  // ---- Cerebro: la IA ----
+  function detalleDeGoogle(cuerpo) {
+    try {
+      const m = JSON.parse(cuerpo).error.message;
+      return m ? String(m).replace(/\s+/g, ' ').slice(0, 220) : '';
+    } catch { return ''; }
+  }
+  function textoDeError(estado, cuerpo) {
+    let msg;
+    if (estado === 400 && /API key|API_KEY/i.test(cuerpo)) msg = 'La clave de Google no es válida. Revisá que esté bien copiada en Ajustes.';
+    else if (estado === 401 || estado === 403) msg = 'Google no aceptó la clave. Revisá en Ajustes que esté bien copiada y que sea la de AI Studio.';
+    else if (estado === 404) msg = 'Google no encuentra ninguno de los modelos de IA. Puede que los hayan renombrado: probá con otro nombre en Ajustes.';
+    else if (estado === 429) msg = 'Google dice que se llegó al límite del plan gratuito (por minuto o por día), incluso probando otros modelos. Esperá un rato y probá de nuevo.';
+    else if (estado >= 500) msg = 'Google tiene problemas en este momento. Probá de nuevo en un rato.';
+    else msg = `Google devolvió un error (${estado}).`;
+    const d = detalleDeGoogle(cuerpo);
+    return d ? `${msg}\n(Google dice: ${d})` : msg;
+  }
+  function mostrarError(e) {
+    bitacora(`error al preguntar: ${(e && (e.estado || e.name || e.musica || (e.vacia && 'vacía'))) || 'red'}`);
+    if (e && e.estado) fallo(textoDeError(e.estado, e.cuerpo || ''));
+    else if (e && e.vacia && e.bloqueo) fallo('Google no me dejó responder eso. Probá preguntarlo de otra manera.');
+    else if (e && e.vacia && e.cortada) fallo('La respuesta se cortó antes de empezar. Probá con una pregunta más corta.');
+    else if (e && e.vacia) fallo('No pude armar una respuesta para eso. Probá preguntarlo de otra forma.');
+    else if (e && e.name === 'AbortError') fallo('La respuesta tardó demasiado. Probá de nuevo.');
+    else if (navigator.onLine === false) fallo('Parece que no hay internet. Revisá la conexión y probá de nuevo.');
+    else fallo('No pude comunicarme con Google. Puede ser internet, o un bloqueo del antivirus o de la red. Probá de nuevo en un momento.');
+  }
+
+  function ordenModelos() {
+    const activo = Date.now() < app.activoHasta ? app.modeloActivo : '';
+    return [...new Set([activo, leerModelo(), ...MODELOS_RESPALDO].filter(Boolean))];
+  }
+  function segundosDeEspera(cuerpo) {
+    if (/PerDay/i.test(cuerpo)) return null;
+    const m = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/.exec(cuerpo);
+    if (!m) return 8;
+    const s = Math.ceil(parseFloat(m[1])) + 1;
+    return s <= 25 ? s : null;
+  }
+
+  async function unIntento(clave, modelo, contenidos) {
+    const control = new AbortController();
+    const reloj = setTimeout(() => control.abort(), 40000);
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        signal: control.signal,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: instrucciones() }] },
+          contents: contenidos,
+          generationConfig: { maxOutputTokens: 2048 }
+        })
+      });
+      if (!resp.ok) throw { estado: resp.status, cuerpo: await resp.text().catch(() => '') };
+      const datos = await resp.json();
+      const candidato = datos.candidates && datos.candidates[0];
+      const partes = (candidato && candidato.content && candidato.content.parts) || [];
+      const texto = partes.filter((p) => !p.thought).map((p) => p.text || '').join('').trim();
+      if (!texto) {
+        const motivo = (candidato && candidato.finishReason) || '';
+        throw {
+          vacia: true,
+          bloqueo: !!(datos.promptFeedback && datos.promptFeedback.blockReason) || /SAFETY|PROHIBITED|BLOCKLIST|RECITATION/.test(motivo),
+          cortada: motivo === 'MAX_TOKENS'
+        };
+      }
+      return texto;
+    } finally {
+      clearTimeout(reloj);
+    }
+  }
+
+  // Prueba con el modelo elegido y, si no responde, con los de respaldo.
+  async function pedirConClave(clave, contenidos) {
+    let ultimo = null;
+    for (const modelo of ordenModelos()) {
+      let reintentos = 0;
+      for (;;) {
+        try {
+          const texto = await unIntento(clave, modelo, contenidos);
+          if (modelo !== app.modeloActivo || Date.now() >= app.activoHasta) {
+            if (modelo !== leerModelo()) aviso(`Usé el modelo "${modelo}" porque "${leerModelo()}" no estaba disponible en este momento.`);
+            app.modeloActivo = modelo;
+          }
+          app.activoHasta = Date.now() + 10 * 60 * 1000;
+          return texto;
+        } catch (e) {
+          ultimo = e;
+          const est = e && e.estado;
+          if (est === 429) {
+            const s = segundosDeEspera(e.cuerpo || '');
+            if (s !== null && reintentos < 1) {
+              reintentos += 1;
+              setEstado('pensando', `Google pide esperar ${s} segundos (plan gratuito)…`);
+              await pausa(s * 1000);
+              setEstado('pensando', 'Pensando…');
+              continue;
+            }
+            break; // pasar al siguiente modelo
+          }
+          if (est >= 500) {
+            if (reintentos < 1) { reintentos += 1; await pausa(1500); continue; }
+            break;
+          }
+          if (est === 404) break;
+          if ((est === 401 || est === 403) && reintentos < 1) { // a veces Google rechaza una vez y a la siguiente acepta
+            reintentos += 1;
+            bitacora(`Google respondió ${est}; reintento una vez`);
+            await pausa(900);
+            continue;
+          }
+          const esRed = !est && !(e && e.vacia) && !(e && e.name === 'AbortError');
+          if (esRed && reintentos < 1 && navigator.onLine !== false) { reintentos += 1; await pausa(1000); continue; }
+          throw e; // clave mala, pregunta bloqueada, sin internet, etc.
+        }
+      }
+    }
+    throw ultimo;
+  }
+
+  const esErrorDeClave = (e) => !!e && (e.estado === 401 || e.estado === 403 || (e.estado === 400 && /API key|API_KEY/i.test(e.cuerpo || '')));
+  // Prueba primero la clave pedida y, si Google la rechaza, la otra (la guardada o la que viene en el archivo).
+  async function pedirRespuesta(clave, contenidos) {
+    const incluida = limpiarClave(CLAVE_INCLUIDA);
+    const candidatas = [...new Set([clave, leerClave(), incluida].filter(Boolean))];
+    let ultimo = null;
+    for (let i = 0; i < candidatas.length; i++) {
+      try {
+        const texto = await pedirConClave(candidatas[i], contenidos);
+        if (i > 0) {
+          bitacora(`la clave ${i === 1 && candidatas[i] === incluida ? 'incluida' : 'alternativa'} funcionó; la anterior no`);
+          const guardada = guardado.leer('asistente_clave');
+          if (candidatas[i] === incluida && guardada && guardada !== incluida) {
+            guardado.borrar('asistente_clave');
+            claveEnMemoria = '';
+            actualizarClave();
+            aviso('La clave que tenía guardada no funcionaba, así que usé la que viene incluida en el archivo.');
+          }
+        }
+        return texto;
+      } catch (e) {
+        ultimo = e;
+        if (!(esErrorDeClave(e) && i < candidatas.length - 1)) throw e;
+        bitacora(`clave ${i + 1} rechazada (${e.estado}); pruebo la siguiente`);
+      }
+    }
+    throw ultimo;
+  }
+
+  async function preguntar(pregunta) {
+    if (app.pensando) return;
+    pausarVigilia();
+    let orden = interpretarMusica(pregunta);
+    if (!orden && Date.now() < app.esperandoHasta) orden = { tipo: 'reproducir', consulta: limpiarConsulta(pregunta) || pregunta };
+    app.esperandoHasta = 0;
+    if (orden) {
+      el.sugerencias.hidden = true;
+      agregar('yo', pregunta);
+      await ejecutarMusica(orden);
+      return;
+    }
+    const clave = leerClave();
+    if (!clave) {
+      el.ajustes.open = true;
+      aviso('Antes de preguntar, pegá la clave de Google en Ajustes.');
+      setEstado('reposo', 'Falta la clave de Google');
+      reanudarVigilia(600);
+      return;
+    }
+    el.sugerencias.hidden = true;
+    agregar('yo', pregunta);
+    memoria.push({ role: 'user', parts: [{ text: pregunta }] });
+    app.pensando = true;
+    setEstado('pensando', 'Pensando…');
+
+    let respuesta;
+    try {
+      const contexto = memoria.slice(-MAX_MENSAJES_MEMORIA);
+      while (contexto.length && contexto[0].role !== 'user') contexto.shift();
+      respuesta = await pedirRespuesta(clave, contexto);
+    } catch (e) {
+      memoria.pop();
+      app.pensando = false;
+      reposo();
+      mostrarError(e);
+      return;
+    }
+    memoria.push({ role: 'model', parts: [{ text: respuesta }] });
+    agregar('robot', respuesta);
+    app.pensando = false;
+    hablar(respuesta);
+  }
+
+  // ---- Botones ----
+  el.mic.addEventListener('click', escuchar);
+  el.musicaPausa.addEventListener('click', () => { if (musica.pausada) seguirMusica(); else pausarMusica(); });
+  el.musicaSiguiente.addEventListener('click', () => { if (!siguienteTema(false)) aviso('Ya no hay más temas en esta lista. Pedime otra música.'); });
+  el.musicaCerrar.addEventListener('click', detenerMusica);
+  el.musicaVolumen.addEventListener('input', () => cambiarVolumenMusica(Number(el.musicaVolumen.value)));
+  el.manos.addEventListener('click', () => { if (app.manos) apagarManos(); else encenderManos(); });
+  el.callar.addEventListener('click', callar);
+  el.limpiar.addEventListener('click', () => {
+    callar();
+    memoria.length = 0;
+    el.historial.replaceChildren();
+    el.sugerencias.hidden = false;
+    setEstado('reposo', 'Conversación borrada');
+  });
+  el.formulario.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const t = el.texto.value.trim();
+    if (!t) return;
+    if (app.pensando) { setEstado('pensando', 'Todavía estoy pensando, un momento…'); return; }
+    el.texto.value = '';
+    callar();
+    preguntar(t);
+  });
+  el.seguir.addEventListener('change', () => guardado.escribir('asistente_seguir', el.seguir.checked ? '1' : '0'));
+
+  // Voz
+  el.voz.addEventListener('change', () => {
+    if (el.voz.value) guardado.escribir('asistente_voz', el.voz.value); else guardado.borrar('asistente_voz');
+    app.voz = elegirVoz();
+  });
+  el.velocidad.addEventListener('input', () => {
+    guardado.escribir('asistente_velocidad', el.velocidad.value);
+    el.velocidadValor.textContent = Number(el.velocidad.value).toFixed(1);
+  });
+  el.probarVoz.addEventListener('click', () => hablar(`Hola, soy ${NOMBRE}. Así suena mi voz.`));
+
+  // Clave
+  function actualizarClave() {
+    const hay = !!leerClave();
+    el.clave.placeholder = hay ? 'Clave cargada (pegá otra para cambiarla)' : 'Pegá la clave acá';
+    el.pasos.hidden = hay;
+    el.resumen.textContent = hay ? 'Ajustes (clave cargada)' : 'Ajustes y clave de la IA (falta la clave)';
+  }
+  el.guardar.addEventListener('click', async () => {
+    const c = limpiarClave(el.clave.value);
+    const m = el.modelo.value.trim() || MODELO_POR_DEFECTO;
+    if (c) {
+      if (c.length < 20) aviso('Esa clave parece muy corta. Si falla, revisá que la hayas copiado completa.');
+      claveEnMemoria = c;
+      guardado.escribir('asistente_clave', c);
+      if (guardado.leer('asistente_clave') !== c) {
+        aviso('Ojo: este navegador no me deja guardar la clave. Funciona mientras no cierres ni recargues la página; después hay que pegarla de nuevo. Abrí el archivo directamente en Chrome para que se guarde.');
+      }
+    }
+    guardado.escribir('asistente_modelo', m);
+    app.modeloActivo = '';
+    app.activoHasta = 0;
+    el.clave.value = '';
+    actualizarClave();
+    if (!leerClave()) { aviso('Primero pegá la clave de Google.'); return; }
+
+    el.guardar.disabled = true;
+    setEstado('pensando', 'Probando la clave…');
+    try {
+      await pedirRespuesta(leerClave(), [{ role: 'user', parts: [{ text: 'Respondé solamente la palabra: listo' }] }]);
+      el.ajustes.open = false;
+      aviso('La clave funciona. Tocá el micrófono o encendé el modo manos libres y preguntá lo que quieras.');
+    } catch (e) {
+      mostrarError(e);
+    } finally {
+      el.guardar.disabled = false;
+      reposo();
+    }
+  });
+  el.borrarClave.addEventListener('click', () => {
+    claveEnMemoria = '';
+    guardado.borrar('asistente_clave');
+    el.clave.value = '';
+    actualizarClave();
+    aviso(CLAVE_INCLUIDA ? 'Borré la clave guardada. Se vuelve a usar la que viene incluida en el archivo.' : 'Clave borrada de este navegador.');
+  });
+
+  // ---- Avisos de errores inesperados (para que se vean y no queden en silencio) ----
+  window.addEventListener('error', (e) => { bitacora(`error de página: ${e.message || 'desconocido'}`); fallo(`Algo falló en la página: ${e.message || 'error desconocido'}`); });
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e.reason;
+    bitacora(`promesa rechazada: ${(r && (r.message || r.estado || r.musica)) || 'desconocido'}`);
+    fallo(`Algo falló: ${(r && r.message) || 'error desconocido'}`);
+  });
+  el.detalleRegistro.addEventListener('toggle', mostrarRegistro);
+  el.copiarRegistro.addEventListener('click', async () => {
+    const texto = registro.join('\n') || 'Sin registro.';
+    try { await navigator.clipboard.writeText(texto); el.copiarRegistro.textContent = 'Copiado'; }
+    catch { el.registro.focus(); try { const rango = document.createRange(); rango.selectNodeContents(el.registro); const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rango); el.copiarRegistro.textContent = 'Seleccionado: apretá Ctrl+C'; } catch { /* nada */ } }
+    setTimeout(() => { el.copiarRegistro.textContent = 'Copiar registro'; }, 2500);
+  });
+  window.addEventListener('pagehide', () => {
+    if (window.speechSynthesis) speechSynthesis.cancel();
+    try { app.reconocimiento && app.reconocimiento.abort(); } catch { /* nada */ }
+    pausarVigilia();
+    if (musica.jugador) { try { musica.jugador.stopVideo(); } catch { /* nada */ } }
+    try {
+      const l = JSON.parse(localStorage.getItem(CLAVE_LIDER) || 'null');
+      if (l && l.id === ID_PESTANA) localStorage.removeItem(CLAVE_LIDER);
+    } catch { /* nada */ }
+  });
+
+  // ---- Arranque ----
+  el.modelo.value = leerModelo();
+  el.velocidad.value = String(leerVelocidad());
+  el.velocidadValor.textContent = leerVelocidad().toFixed(1);
+  el.seguir.checked = guardado.leer('asistente_seguir') === '1';
+  { const v = parseInt(guardado.leer('asistente_volumen_musica'), 10); musica.volumen = v >= 0 && v <= 100 ? v : 50; el.musicaVolumen.value = String(musica.volumen); }
+  if (window.speechSynthesis) {
+    llenarVoces();
+    speechSynthesis.onvoiceschanged = llenarVoces;
+  }
+  for (const texto of SUGERENCIAS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.textContent = texto;
+    b.addEventListener('click', () => { callar(); preguntar(texto); });
+    el.sugerencias.appendChild(b);
+  }
+  actualizarClave();
+  if (leerClave()) {
+    agregar('robot', `Hola, soy ${NOMBRE}. Encendé el modo manos libres y decí “Hola ${NOMBRE}”, o tocá el micrófono. También podés elegir una de las preguntas de abajo.`);
+  } else {
+    el.ajustes.open = true;
+    agregar('robot', `Hola, soy ${NOMBRE}. Para empezar, pegá la clave de Google en Ajustes (arriba) y tocá "Guardar y probar la clave".`);
+  }
+  if (!Reconocimiento) aviso('Este navegador no entiende la voz. Para hablar usá Chrome o Edge; mientras tanto podés escribir.');
+  if (window.top !== window.self) aviso('Parece que esta página se está mostrando dentro de otra aplicación, y ahí el micrófono suele estar bloqueado. Para hablar, abrí el archivo directamente en Chrome.');
+  bitacora(`página abierta (${enArchivo ? 'archivo' : location.origin}); clave ${guardado.leer('asistente_clave') ? 'guardada' : 'incluida'}`);
+  if (guardado.leer('asistente_manos') === '1' && Reconocimiento && leerClave()) {
+    if (leerLider()) {
+      bitacora('no enciendo el micrófono: otra pestaña de Rango ya escucha');
+      aviso('Rango ya está abierto en otra pestaña, y esa es la que escucha. Acá no encendí el micrófono; si querés usar esta pestaña, tocá "Manos libres".');
+    } else {
+      app.manos = true; // lo dejó encendido la última vez
+      tomarLiderazgo();
+      actualizarManos();
+      setEstado('reposo', textoReposo());
+      reanudarVigilia(600);
+    }
+  }
+  app.listo = true; // desde acá, cada mensaje nuevo desplaza la pantalla hacia abajo
+})();
+</script>
+</body>
+</html>
