@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Elegir la voz de Rango</title>
+<style>body{font:18px/1.4 -apple-system,Arial,sans-serif;margin:20px;background:#f4efe6;color:#1f2d2a}
+h2{margin:0 0 6px}p{margin:6px 0}
+button{font-size:19px;padding:14px;margin:6px 0;width:100%;border-radius:12px;border:2px solid #1f2d2a;background:#e0a22f;text-align:left}
+button small{display:block;font-size:14px;opacity:.75}
+select{font-size:18px;padding:10px;width:100%;margin:6px 0;border-radius:10px}
+pre{white-space:pre-wrap;background:#fff;padding:10px;border-radius:8px;font-size:14px}</style></head><body>
+<h2>Elegir la voz de Rango</h2>
+<p>Conectá el JBL si querés, subí el volumen y tocá una voz. <b>Esperá unos 20 segundos entre una y otra</b>: los modelos de voz tienen un límite de pedidos por minuto.</p>
+<label>Estilo</label>
+<select id="estilo">
+  <option value="oeste">Pícaro, del oeste, rioplatense</option>
+  <option value="calido">Cálido y tranquilo</option>
+  <option value="neutro">Sin estilo (solo la voz)</option>
+</select>
+<div id="lista"></div>
+<pre id="log"></pre>
+<script>
+const VOCES=[
+  ['Algenib','grave y rasposa'],['Orus','firme, seria'],['Fenrir','vivaz, entusiasta'],['Puck','alegre, juguetona'],
+  ['Umbriel','tranquila, canchera'],['Charon','pausada, informativa'],['Alnilam','firme, directa'],['Gacrux','madura, calma'],
+  ['Iapetus','clara, cercana'],['Rasalgethi','narradora'],['Enceladus','suave, con aire'],['Algieba','suave, fluida']
+];
+const ESTILOS={
+  oeste:'Hablá como un personaje pícaro y simpático de un pueblo del lejano oeste, con tono socarrón y pausado, con acento rioplatense argentino, y decí: ',
+  calido:'Decilo con voz natural, cálida y tranquila, en español rioplatense: ',
+  neutro:''
+};
+const FRASE='Qué hacés, compadre. Soy Rango, el más pícaro de este pueblo. Pedime lo que quieras, que acá nadie se va con las manos vacías.';
+const MODELOS=['gemini-2.5-flash-preview-tts','gemini-2.5-flash-tts','gemini-2.5-pro-preview-tts'];
+const log=(t)=>{document.getElementById('log').textContent+=t+'\n'};
+let clave='';try{clave=localStorage.getItem('asistente_clave')||''}catch{}
+if(!clave)log('No encuentro la clave en este navegador: abrí Rango (la página principal), guardala en Ajustes y volvé acá.');
+let ctx=null;
+async function probar(voz){
+  if(!clave){log('Falta la clave.');return}
+  ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();ctx.resume();
+  const est=ESTILOS[document.getElementById('estilo').value];
+  let primero='';try{primero=localStorage.getItem('asistente_modelo_voz')||''}catch{}
+  const orden=[primero,...MODELOS].filter((m,i,a)=>m&&a.indexOf(m)===i);
+  log('→ '+voz+'…');
+  for(const m of orden){
+    try{
+      const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+m+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':clave},
+        body:JSON.stringify({contents:[{parts:[{text:est+FRASE}]}],generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:voz}}}}})});
+      if(!r.ok){log('  '+m+': HTTP '+r.status+(r.status===429?' (demasiados pedidos, esperá un minuto)':''));continue}
+      const j=await r.json();const p=((j.candidates||[])[0]||{content:{parts:[]}}).content.parts.find(x=>x.inlineData);
+      if(!p){log('  '+m+': sin audio');continue}
+      const mr=/rate=(\d+)/.exec(p.inlineData.mimeType||'');const tasa=mr?+mr[1]:24000;
+      const bin=atob(p.inlineData.data);const n=bin.length>>1;const buf=ctx.createBuffer(1,n,tasa);const ch=buf.getChannelData(0);
+      for(let i=0;i<n;i++){let v=bin.charCodeAt(2*i)|(bin.charCodeAt(2*i+1)<<8);if(v>=32768)v-=65536;ch[i]=v/32768}
+      const s=ctx.createBufferSource();s.buffer=buf;s.connect(ctx.destination);s.start();
+      log('  reproduciendo ('+(n/tasa).toFixed(1)+' s)');return;
+    }catch(e){log('  '+m+': error '+(e.name||e))}
+  }
+  log('  no pude generar esta voz.');
+}
+const lista=document.getElementById('lista');
+for(const [v,d] of VOCES){const b=document.createElement('button');b.innerHTML=v+'<small>'+d+'</small>';b.onclick=()=>probar(v);lista.appendChild(b)}
+</script></body></html>
