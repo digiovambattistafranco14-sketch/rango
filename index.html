@@ -268,6 +268,30 @@
       <div class="campo">
         <label><input type="checkbox" id="vozGemini"> Usar la voz de Gemini (sale por el parlante Bluetooth; gasta un poco de la cuota de la clave)</label>
       </div>
+      <div class="campo">
+        <label for="vozGeminiNombre">Voz de Gemini</label>
+        <select id="vozGeminiNombre">
+          <option value="Kore">Kore (firme, clara)</option>
+          <option value="Algenib">Algenib (grave y rasposa)</option>
+          <option value="Orus">Orus (firme, seria)</option>
+          <option value="Fenrir">Fenrir (vivaz, entusiasta)</option>
+          <option value="Puck">Puck (alegre, juguetona)</option>
+          <option value="Umbriel">Umbriel (tranquila, canchera)</option>
+          <option value="Charon">Charon (pausada)</option>
+          <option value="Alnilam">Alnilam (firme, directa)</option>
+          <option value="Gacrux">Gacrux (madura, calma)</option>
+          <option value="Iapetus">Iapetus (clara, cercana)</option>
+          <option value="Rasalgethi">Rasalgethi (narradora)</option>
+          <option value="Enceladus">Enceladus (suave, con aire)</option>
+          <option value="Algieba">Algieba (suave, fluida)</option>
+        </select>
+        <label for="estiloGemini">Estilo al hablar</label>
+        <select id="estiloGemini">
+          <option value="calido">Cálido y tranquilo</option>
+          <option value="oeste">Pícaro, del oeste, rioplatense</option>
+          <option value="neutro">Sin estilo (solo la voz)</option>
+        </select>
+      </div>
       <div class="fila">
         <button type="button" class="boton" id="probarVoz">Probar la voz</button>
       </div>
@@ -420,7 +444,7 @@
     formulario: $('formulario'), texto: $('texto'),
     ajustes: $('ajustes'), resumen: $('resumen'), pasos: $('pasos'),
     clave: $('clave'), modelo: $('modelo'), guardar: $('guardar'), borrarClave: $('borrarClave'),
-    campoVoz: $('campoVoz'), voz: $('voz'), velocidad: $('velocidad'), velocidadValor: $('velocidadValor'), probarVoz: $('probarVoz'), vozGemini: $('vozGemini')
+    campoVoz: $('campoVoz'), voz: $('voz'), velocidad: $('velocidad'), velocidadValor: $('velocidadValor'), probarVoz: $('probarVoz'), vozGemini: $('vozGemini'), vozGeminiNombre: $('vozGeminiNombre'), estiloGemini: $('estiloGemini')
   };
 
   const memoria = [];
@@ -645,6 +669,14 @@
   // ---- Voz de Gemini: llega como audio y se reproduce por el camino normal (sale por Bluetooth) ----
   const ES_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const MODELOS_VOZ = ['gemini-2.5-flash-preview-tts', 'gemini-2.5-flash-tts', 'gemini-2.5-pro-preview-tts'];
+  const ESTILOS_VOZ = {
+    calido: 'Decilo con voz natural, cálida y tranquila, en español rioplatense: ',
+    oeste: 'Hablá como un personaje pícaro y simpático de un pueblo del lejano oeste, con tono socarrón y pausado, con acento rioplatense argentino, y decí: ',
+    neutro: ''
+  };
+  const NOMBRES_VOZ = ['Kore', 'Algenib', 'Orus', 'Fenrir', 'Puck', 'Umbriel', 'Charon', 'Alnilam', 'Gacrux', 'Iapetus', 'Rasalgethi', 'Enceladus', 'Algieba'];
+  const nombreVozGemini = () => { const v = guardado.leer('asistente_voz_gemini_nombre'); return NOMBRES_VOZ.includes(v) ? v : 'Kore'; };
+  const estiloVozGemini = () => { const v = guardado.leer('asistente_estilo_gemini'); return Object.prototype.hasOwnProperty.call(ESTILOS_VOZ, v) ? v : 'calido'; };
   function usarVozGemini() {
     const v = guardado.leer('asistente_voz_gemini');
     return v ? v === 'si' : ES_IOS;
@@ -676,8 +708,8 @@
             signal: control.signal,
             headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: 'Decilo con voz natural, cálida y tranquila, en español rioplatense: ' + t }] }],
-              generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } } }
+              contents: [{ parts: [{ text: ESTILOS_VOZ[estiloVozGemini()] + t }] }],
+              generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: nombreVozGemini() } } } }
             })
           });
           if (!resp.ok) { bitacora(`voz Gemini ${m}: HTTP ${resp.status}`); continue; }
@@ -1693,6 +1725,8 @@
     callar();
     preguntar(t);
   });
+  el.vozGeminiNombre.addEventListener('change', () => guardado.escribir('asistente_voz_gemini_nombre', el.vozGeminiNombre.value));
+  el.estiloGemini.addEventListener('change', () => guardado.escribir('asistente_estilo_gemini', el.estiloGemini.value));
   el.vozGemini.addEventListener('change', () => guardado.escribir('asistente_voz_gemini', el.vozGemini.checked ? 'si' : 'no'));
   el.seguir.addEventListener('change', () => guardado.escribir('asistente_seguir', el.seguir.checked ? '1' : '0'));
 
@@ -1705,7 +1739,7 @@
     guardado.escribir('asistente_velocidad', el.velocidad.value);
     el.velocidadValor.textContent = Number(el.velocidad.value).toFixed(1);
   });
-  el.probarVoz.addEventListener('click', () => hablar(`Hola, soy ${NOMBRE}. Así suena mi voz.`));
+  el.probarVoz.addEventListener('click', () => hablar(`Qué hacés, compadre. Soy ${NOMBRE}. Pedime lo que quieras, que acá nadie se va con las manos vacías.`));
 
   // Clave
   function actualizarClave() {
@@ -1784,6 +1818,8 @@
   el.velocidadValor.textContent = leerVelocidad().toFixed(1);
   el.seguir.checked = guardado.leer('asistente_seguir') === '1';
   el.vozGemini.checked = usarVozGemini();
+  el.vozGeminiNombre.value = nombreVozGemini();
+  el.estiloGemini.value = estiloVozGemini();
   { const v = parseInt(guardado.leer('asistente_volumen_musica'), 10); musica.volumen = v >= 0 && v <= 100 ? v : 50; el.musicaVolumen.value = String(musica.volumen); }
   if (window.speechSynthesis) {
     llenarVoces();
