@@ -358,9 +358,19 @@
     }
   };
   // iPhone/Safari solo deja hablar si antes hubo un toque del usuario: con el primer toque "destraba" la voz.
-  document.addEventListener('pointerdown', () => {
-    try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); } catch { /* sin voz */ }
-  }, { once: true });
+  // Se repite en cada toque hasta que el navegador confirme que arrancó una voz (en iPhone el primer intento a veces no cuenta).
+  let vozDestrabada = false;
+  function destrabarVoz() {
+    if (vozDestrabada) return;
+    try {
+      const u = new SpeechSynthesisUtterance('listo');
+      u.volume = 0;
+      u.lang = 'es-AR';
+      u.onstart = () => { vozDestrabada = true; };
+      speechSynthesis.speak(u);
+    } catch { /* sin voz */ }
+  }
+  ['pointerdown', 'touchend', 'click'].forEach((ev) => document.addEventListener(ev, destrabarVoz, { passive: true }));
   const SUGERENCIAS = ['¿Cómo preparo milanesas al horno?', 'Contame un chiste corto', '¿Qué día es hoy?', 'Poné música de Charly García'];
 
   const INSTRUCCIONES_BASE = `Te llamás ${NOMBRE} (se te despierta diciendo "Hola ${NOMBRE}") y sos el asistente personal de una familia argentina que vive en una casa de dos pisos. ` +
@@ -591,7 +601,13 @@
         if (app.voz) u.voice = app.voz;
         u.rate = velocidad;
         u.onend = alTerminarTrozo;
-        u.onerror = alTerminarTrozo;
+        u.onerror = (e) => {
+          if (e && (e.error === 'not-allowed' || e.error === 'synthesis-failed') && !app.avisoVoz) {
+            app.avisoVoz = true;
+            aviso('El celu no me dejó hablar sin que lo toques. Tocá cualquier parte de la pantalla (o el micrófono) y volvé a probar.');
+          }
+          alTerminarTrozo();
+        };
         speechSynthesis.speak(u);
       }
     }, 80);
