@@ -1009,6 +1009,7 @@
     musica.titulo = v.titulo || musica.consulta;
     el.musicaTitulo.textContent = musica.titulo;
     musica.pausada = false;
+    musica.pausaPedidaHasta = 0;
     musica.bloqueado = false;
     actualizarBotonPausa();
     try { musica.jugador.loadVideoById(v.id); } catch { alFallarVideo(); return; }
@@ -1024,6 +1025,10 @@
   }
   function alCambiarEstadoMusica(e) {
     if (!e) return;
+    if (e.data === 1 && musica.pausada && Date.now() < (musica.pausaPedidaHasta || 0)) {
+      try { musica.jugador.pauseVideo(); } catch { /* nada */ }
+      return;
+    }
     if (e.data === 1) { musica.pausada = false; musica.errores = 0; aplicarVolumenMusica(); }
     else if (e.data === 2) musica.pausada = true;
     else if (e.data === 0) { siguienteTema(true); return; }
@@ -1052,16 +1057,27 @@
     if (!musicaActiva()) return false;
     try { musica.jugador.pauseVideo(); } catch { return false; }
     musica.pausada = true; actualizarBotonPausa();
+    // En el iPhone el video a veces se "despausa" solo cuando Rango habla encima: durante unos segundos la pausa se defiende.
+    musica.pausaPedidaHasta = Date.now() + 9000;
     return true;
+  }
+  // Cuando Rango termina de hablar, si la música sigue sonando pese a que se pidió pausa, se vuelve a pausar.
+  function verificarPausa() {
+    if (!musica.pausada) return;
+    setTimeout(() => {
+      try { if (musica.pausada && musica.jugador && musica.jugador.getPlayerState() === 1) musica.jugador.pauseVideo(); } catch { /* nada */ }
+    }, 500);
   }
   function seguirMusica() {
     if (!musicaActiva()) return false;
+    musica.pausaPedidaHasta = 0;
     try { musica.jugador.playVideo(); } catch { return false; }
     musica.pausada = false; actualizarBotonPausa();
     return true;
   }
   function detenerMusica() {
     clearTimeout(musica.arranque);
+    musica.pausaPedidaHasta = 0;
     if (musica.jugador) { try { musica.jugador.stopVideo(); } catch { /* nada */ } }
     musica.cola = [];
     musica.pos = -1;
@@ -1156,7 +1172,7 @@
         else responder('No hay música sonando.');
         break;
       case 'pausa':
-        responder(pausarMusica() ? 'Pausada.' : 'No hay música sonando.');
+        responder(pausarMusica() ? 'Pausada.' : 'No hay música sonando.', verificarPausa);
         break;
       case 'seguir':
         responder(seguirMusica() ? 'Dale, sigo.' : 'No hay música para seguir.');
