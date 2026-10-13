@@ -895,8 +895,64 @@
     });
   }
 
+  // En la PC, Rango busca con su servidor propio (/buscar). Publicado en internet (GitHub Pages) no hay servidor,
+  // así que busca en servicios públicos que listan videos de YouTube; se prueban en orden hasta que uno responda.
+  const SERVIDOR_PROPIO = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  const BUSCADORES = [
+    { base: 'https://api.piped.private.coffee', tipo: 'piped' },
+    { base: 'https://pipedapi.kavin.rocks', tipo: 'piped' },
+    { base: 'https://pipedapi.adminforge.de', tipo: 'piped' },
+    { base: 'https://inv.nadeko.net', tipo: 'invidious' },
+    { base: 'https://yewtu.be', tipo: 'invidious' }
+  ];
+  let buscadorBueno = 0;
+  const horaMinSeg = (seg) => Number.isFinite(seg) ? seg : 0;
+  function videosDeBuscador(b, datos) {
+    const salida = [];
+    if (b.tipo === 'piped') {
+      for (const x of (datos && datos.items) || []) {
+        const m = /[?&]v=([\w-]{11})/.exec((x && x.url) || '');
+        if (!m || x.type !== 'stream' || x.isShort) continue;
+        const dur = horaMinSeg(x.duration);
+        if (dur < 60 || dur > 3 * 3600) continue;
+        salida.push({ id: m[1], titulo: String(x.title || '').slice(0, 120) });
+      }
+    } else {
+      for (const x of Array.isArray(datos) ? datos : []) {
+        if (!x || x.type !== 'video' || !/^[\w-]{11}$/.test(x.videoId || '')) continue;
+        const dur = horaMinSeg(x.lengthSeconds);
+        if (dur < 60 || dur > 3 * 3600) continue;
+        salida.push({ id: x.videoId, titulo: String(x.title || '').slice(0, 120) });
+      }
+    }
+    return salida;
+  }
+  async function buscarEnInternet(consulta) {
+    const orden = BUSCADORES.map((_, i) => (i + buscadorBueno) % BUSCADORES.length);
+    for (const i of orden) {
+      const b = BUSCADORES[i];
+      const control = new AbortController();
+      const reloj = setTimeout(() => control.abort(), 8000);
+      try {
+        const url = b.tipo === 'piped'
+          ? `${b.base}/search?q=${encodeURIComponent(consulta)}&filter=videos`
+          : `${b.base}/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`;
+        const resp = await fetch(url, { signal: control.signal });
+        if (!resp.ok) { bitacora(`buscador ${b.base}: HTTP ${resp.status}`); continue; }
+        const lista = videosDeBuscador(b, await resp.json());
+        if (lista.length) { buscadorBueno = i; return lista.slice(0, 15); }
+        bitacora(`buscador ${b.base}: sin resultados`);
+      } catch (e) {
+        bitacora(`buscador ${b.base}: ${(e && e.name) || e}`);
+      } finally {
+        clearTimeout(reloj);
+      }
+    }
+    throw { musica: 'busqueda' };
+  }
   async function buscarVideos(consulta) {
     if (enArchivo) throw { musica: 'archivo' };
+    if (!SERVIDOR_PROPIO) return buscarEnInternet(consulta);
     const control = new AbortController();
     const reloj = setTimeout(() => control.abort(), 20000);
     try {
