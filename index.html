@@ -265,6 +265,9 @@
         <label for="velocidad">Velocidad al hablar: <span id="velocidadValor">1.0</span></label>
         <input type="range" id="velocidad" min="0.7" max="1.3" step="0.1" value="1">
       </div>
+      <div class="campo">
+        <label><input type="checkbox" id="vozGemini"> Usar la voz de Gemini (sale por el parlante Bluetooth; gasta un poco de la cuota de la clave)</label>
+      </div>
       <div class="fila">
         <button type="button" class="boton" id="probarVoz">Probar la voz</button>
       </div>
@@ -370,7 +373,19 @@
       speechSynthesis.speak(u);
     } catch { /* sin voz */ }
   }
-  ['pointerdown', 'touchend', 'click'].forEach((ev) => document.addEventListener(ev, destrabarVoz, { passive: true }));
+  // Audio "normal" (el mismo camino que el pip): en iPhone sale por el parlante Bluetooth, a diferencia de la voz del sistema.
+  let ctxVoz = null;
+  function destrabarAudio() {
+    try {
+      if (!ctxVoz) ctxVoz = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctxVoz.state === 'running') return;
+      ctxVoz.resume();
+      const b = ctxVoz.createBuffer(1, 1, 22050);
+      const f = ctxVoz.createBufferSource();
+      f.buffer = b; f.connect(ctxVoz.destination); f.start(0);
+    } catch { /* sin audio */ }
+  }
+  ['pointerdown', 'touchend', 'click'].forEach((ev) => document.addEventListener(ev, () => { destrabarVoz(); destrabarAudio(); }, { passive: true }));
   const SUGERENCIAS = ['¿Cómo preparo milanesas al horno?', 'Contame un chiste corto', '¿Qué día es hoy?', 'Poné música de Charly García'];
 
   const INSTRUCCIONES_BASE = `Te llamás ${NOMBRE} (se te despierta diciendo "Hola ${NOMBRE}") y sos el asistente personal de una familia argentina que vive en una casa de dos pisos. ` +
@@ -405,7 +420,7 @@
     formulario: $('formulario'), texto: $('texto'),
     ajustes: $('ajustes'), resumen: $('resumen'), pasos: $('pasos'),
     clave: $('clave'), modelo: $('modelo'), guardar: $('guardar'), borrarClave: $('borrarClave'),
-    campoVoz: $('campoVoz'), voz: $('voz'), velocidad: $('velocidad'), velocidadValor: $('velocidadValor'), probarVoz: $('probarVoz')
+    campoVoz: $('campoVoz'), voz: $('voz'), velocidad: $('velocidad'), velocidadValor: $('velocidadValor'), probarVoz: $('probarVoz'), vozGemini: $('vozGemini')
   };
 
   const memoria = [];
@@ -577,6 +592,7 @@
     pausarVigilia(); // mientras habla, el oído se apaga para que no se escuche a sí mismo
     clearTimeout(app.vigia);
     speechSynthesis.cancel();
+    pararVozGemini();
     if (!partes.length) { app.hablando = false; reposo(); correrDespues(); return; }
 
     const token = ++app.tokenVoz;
@@ -591,6 +607,7 @@
       pendientes -= 1;
       if (pendientes <= 0) terminarDeHablar(token);
     };
+    const conVozDelNavegador = () => { clearTimeout(app.vigia);
     // Pequeña pausa después de cancelar: Chrome a veces se "come" lo primero que se le manda enseguida.
     setTimeout(() => {
       if (token !== app.tokenVoz) return;
@@ -614,6 +631,94 @@
     // Vigía: si el navegador nunca avisa que terminó, no nos quedamos trabados.
     const estimado = (partes.join(' ').length * 95) / velocidad + 6000;
     app.vigia = setTimeout(() => terminarDeHablar(token), estimado);
+    };
+    if (usarVozGemini() && leerClave()) {
+      app.vigia = setTimeout(() => terminarDeHablar(token), 30000);
+      hablarGemini(limpiarParaVoz(texto), token, velocidad).then((ok) => {
+        if (token !== app.tokenVoz) return;
+        if (!ok) conVozDelNavegador();
+      });
+    } else {
+      conVozDelNavegador();
+    }
+  }
+  // ---- Voz de Gemini: llega como audio y se reproduce por el camino normal (sale por Bluetooth) ----
+  const ES_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const MODELOS_VOZ = ['gemini-2.5-flash-preview-tts', 'gemini-2.5-flash-tts', 'gemini-2.5-pro-preview-tts'];
+  function usarVozGemini() {
+    const v = guardado.leer('asistente_voz_gemini');
+    return v ? v === 'si' : ES_IOS;
+  }
+  function pararVozGemini() {
+    const f = app.fuenteVoz;
+    app.fuenteVoz = null;
+    if (f) { try { f.onended = null; f.stop(); } catch { /* ya parada */ } }
+  }
+  async function hablarGemini(texto, token, velocidad) {
+    try {
+      if (!ctxVoz) destrabarAudio();
+      if (!ctxVoz) return false;
+      if (ctxVoz.state !== 'running') {
+        await Promise.race([ctxVoz.resume(), new Promise((r) => setTimeout(r, 700))]);
+        if (ctxVoz.state !== 'running') { bitacora('voz Gemini: el audio del celu está bloqueado, uso la voz del sistema'); return false; }
+      }
+      let t = texto;
+      if (t.length > 1200) t = t.slice(0, Math.max(t.lastIndexOf(' ', 1200), 600));
+      if (!t) return false;
+      const clave = leerClave();
+      const probar = [guardado.leer('asistente_modelo_voz'), ...MODELOS_VOZ].filter((m, i, a) => m && a.indexOf(m) === i);
+      for (const m of probar) {
+        const control = new AbortController();
+        const reloj = setTimeout(() => control.abort(), 25000);
+        try {
+          const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+            method: 'POST',
+            signal: control.signal,
+            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': clave },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'Decilo con voz natural, cálida y tranquila, en español rioplatense: ' + t }] }],
+              generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } } }
+            })
+          });
+          if (!resp.ok) { bitacora(`voz Gemini ${m}: HTTP ${resp.status}`); continue; }
+          const datos = await resp.json();
+          const partes = (datos.candidates && datos.candidates[0] && datos.candidates[0].content && datos.candidates[0].content.parts) || [];
+          const p = partes.find((x) => x.inlineData && x.inlineData.data);
+          if (!p) { bitacora(`voz Gemini ${m}: sin audio`); continue; }
+          if (token !== app.tokenVoz) return true; // lo interrumpieron mientras llegaba
+          const mr = /rate=(\d+)/.exec(p.inlineData.mimeType || '');
+          const tasa = mr ? parseInt(mr[1], 10) : 24000;
+          const bin = atob(p.inlineData.data);
+          const n = bin.length >> 1;
+          const buf = ctxVoz.createBuffer(1, n, tasa);
+          const canal = buf.getChannelData(0);
+          for (let i = 0; i < n; i++) {
+            let v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+            if (v >= 32768) v -= 65536;
+            canal[i] = v / 32768;
+          }
+          pararVozGemini();
+          const fuente = ctxVoz.createBufferSource();
+          fuente.buffer = buf;
+          fuente.playbackRate.value = velocidad;
+          fuente.connect(ctxVoz.destination);
+          app.fuenteVoz = fuente;
+          clearTimeout(app.vigia);
+          app.vigia = setTimeout(() => terminarDeHablar(token), (n / tasa / velocidad) * 1000 + 4000);
+          fuente.onended = () => { if (app.fuenteVoz === fuente) { app.fuenteVoz = null; terminarDeHablar(token); } };
+          fuente.start();
+          guardado.escribir('asistente_modelo_voz', m);
+          return true;
+        } catch (e) {
+          bitacora(`voz Gemini ${m}: ${(e && e.name) || e}`);
+        } finally {
+          clearTimeout(reloj);
+        }
+      }
+    } catch (e) {
+      bitacora('voz Gemini: ' + ((e && e.message) || e));
+    }
+    return false;
   }
   function terminarDeHablar(token) {
     if (token !== app.tokenVoz || !app.hablando) return;
@@ -636,6 +741,7 @@
   function callar() {
     app.tokenVoz += 1;
     clearTimeout(app.vigia);
+    pararVozGemini();
     if (window.speechSynthesis) speechSynthesis.cancel();
     app.hablando = false;
     if (!app.escuchando && !app.pensando) reposo();
@@ -1515,6 +1621,7 @@
     callar();
     preguntar(t);
   });
+  el.vozGemini.addEventListener('change', () => guardado.escribir('asistente_voz_gemini', el.vozGemini.checked ? 'si' : 'no'));
   el.seguir.addEventListener('change', () => guardado.escribir('asistente_seguir', el.seguir.checked ? '1' : '0'));
 
   // Voz
@@ -1604,6 +1711,7 @@
   el.velocidad.value = String(leerVelocidad());
   el.velocidadValor.textContent = leerVelocidad().toFixed(1);
   el.seguir.checked = guardado.leer('asistente_seguir') === '1';
+  el.vozGemini.checked = usarVozGemini();
   { const v = parseInt(guardado.leer('asistente_volumen_musica'), 10); musica.volumen = v >= 0 && v <= 100 ? v : 50; el.musicaVolumen.value = String(musica.volumen); }
   if (window.speechSynthesis) {
     llenarVoces();
