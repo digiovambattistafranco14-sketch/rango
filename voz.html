@@ -9,6 +9,8 @@ pre{white-space:pre-wrap;background:#fff;padding:10px;border-radius:8px;font-siz
 <button id="a">1. Hablar (voz por defecto)</button>
 <button id="b">2. Hablar en español</button>
 <button id="c">3. Sonido de prueba (pip)</button>
+<button id="d">4. Hablar + audio silencioso de fondo</button>
+<button id="e">5. Voz de Gemini (por Bluetooth)</button>
 <pre id="log">cargando…</pre>
 <script>
 const log=(t)=>{document.getElementById('log').textContent+='\n'+t};
@@ -33,5 +35,38 @@ document.getElementById('a').onclick=()=>hablar(false);
 document.getElementById('b').onclick=()=>hablar(true);
 document.getElementById('c').onclick=()=>{
   try{const A=new (window.AudioContext||window.webkitAudioContext)();A.resume();const o=A.createOscillator(),g=A.createGain();g.gain.value=0.3;o.frequency.value=660;o.connect(g);g.connect(A.destination);o.start();setTimeout(()=>o.stop(),500);log('pip enviado (estado: '+A.state+')')}catch(e){log('error pip: '+e)}
+};
+
+// 4: mantiene el audio "de reproducción" activo para ver si la voz sigue al JBL
+let ctxFondo=null;
+document.getElementById('d').onclick=()=>{
+  try{
+    if(!ctxFondo){ctxFondo=new (window.AudioContext||window.webkitAudioContext)();const o=ctxFondo.createOscillator(),g=ctxFondo.createGain();g.gain.value=0.0001;o.connect(g);g.connect(ctxFondo.destination);o.start()}
+    ctxFondo.resume();log('audio de fondo activo ('+ctxFondo.state+')');
+  }catch(e){log('error fondo: '+e)}
+  hablar(true);
+};
+// 5: pide el audio a Gemini y lo reproduce con WebAudio (sale por el JBL como el pip)
+document.getElementById('e').onclick=async()=>{
+  let clave='';try{clave=localStorage.getItem('asistente_clave')||''}catch{}
+  if(!clave){log('No encuentro la clave: abrí Rango (index) en este mismo navegador y guardala en Ajustes.');return}
+  const ctx=new (window.AudioContext||window.webkitAudioContext)();ctx.resume();
+  const modelos=['gemini-2.5-flash-preview-tts','gemini-2.5-flash-tts','gemini-2.5-pro-preview-tts'];
+  for(const m of modelos){
+    try{
+      log('probando '+m+'…');
+      const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+m+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':clave},
+        body:JSON.stringify({contents:[{parts:[{text:'Decí con voz amable y tono argentino: Hola, soy Rango. Si me escuchás por el parlante, funciona.'}]}],generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:'Kore'}}}}})});
+      if(!r.ok){log('  '+m+' -> HTTP '+r.status);continue}
+      const j=await r.json();
+      const p=j.candidates&&j.candidates[0]&&j.candidates[0].content.parts.find(x=>x.inlineData);
+      if(!p){log('  '+m+' -> sin audio');continue}
+      const bin=atob(p.inlineData.data);const n=bin.length>>1;const buf=ctx.createBuffer(1,n,24000);const ch=buf.getChannelData(0);
+      for(let i=0;i<n;i++){let v=bin.charCodeAt(2*i)|(bin.charCodeAt(2*i+1)<<8);if(v>=32768)v-=65536;ch[i]=v/32768}
+      const src=ctx.createBufferSource();src.buffer=buf;src.connect(ctx.destination);src.start();
+      log('  '+m+' -> reproduciendo ('+(n/24000).toFixed(1)+' s)');return;
+    }catch(e){log('  '+m+' -> error: '+e)}
+  }
+  log('Ningún modelo de voz de Gemini respondió.');
 };
 </script></body></html>
